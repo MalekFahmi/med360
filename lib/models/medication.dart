@@ -1,49 +1,43 @@
-// FR3 — Medication Information Integration
-// Represents a medication retrieved from LIMU Care (static data for now)
+// Medication model — standalone version.
+// The patient creates and owns all their medication records directly.
 
 enum ReminderType { notification, alarm }
-
 enum MedicationStatus { active, paused, completed }
+enum MedicationForm { tablet, capsule, liquid, injection, drops, inhaler, patch, other }
 
-class MedicationSchedule {
-  final List<String> times; // e.g. ['08:00', '20:00']
-  final String frequency;   // e.g. 'Twice daily'
-  final String frequencyAr; // Arabic: 'مرتين يومياً'
+class ReminderTime {
+  final int hour;
+  final int minute;
 
-  const MedicationSchedule({
-    required this.times,
-    required this.frequency,
-    required this.frequencyAr,
-  });
+  const ReminderTime({required this.hour, required this.minute});
 
-  Map<String, dynamic> toMap() => {
-    'times': times,
-    'frequency': frequency,
-    'frequencyAr': frequencyAr,
-  };
+  String get display =>
+      '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
 
-  factory MedicationSchedule.fromMap(Map<String, dynamic> map) =>
-      MedicationSchedule(
-        times: List<String>.from(map['times']),
-        frequency: map['frequency'],
-        frequencyAr: map['frequencyAr'],
-      );
+  Map<String, dynamic> toMap() => {'hour': hour, 'minute': minute};
+
+  factory ReminderTime.fromMap(Map<String, dynamic> m) =>
+      ReminderTime(hour: m['hour'], minute: m['minute']);
+
+  factory ReminderTime.fromString(String s) {
+    final parts = s.split(':');
+    return ReminderTime(
+        hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+  }
 }
 
 class Medication {
   final String id;
   final String name;
-  final String nameAr;           // Arabic name — FR Arabic support
-  final String dosage;           // e.g. '500mg'
-  final String form;             // e.g. 'Tablet', 'Capsule'
-  final String formAr;
-  final String indication;       // e.g. 'Diabetes management'
+  final String nameAr;
+  final String dosage;         // e.g. "500mg"
+  final MedicationForm form;
+  final String indication;     // what it's for — entered by patient
   final String indicationAr;
-  final String prescribedBy;
-  final MedicationSchedule schedule;
+  final List<ReminderTime> reminderTimes;
   final ReminderType reminderType;
   final MedicationStatus status;
-  final DateTime prescribedDate;
+  final DateTime startDate;
   final String? notes;
   final String? notesAr;
 
@@ -53,59 +47,103 @@ class Medication {
     required this.nameAr,
     required this.dosage,
     required this.form,
-    required this.formAr,
     required this.indication,
     required this.indicationAr,
-    required this.prescribedBy,
-    required this.schedule,
+    required this.reminderTimes,
     required this.reminderType,
     required this.status,
-    required this.prescribedDate,
+    required this.startDate,
     this.notes,
     this.notesAr,
   });
 
-  // Full display name with dosage
   String get displayName => '$name $dosage';
   String get displayNameAr => '$nameAr $dosage';
+
+  String get formLabel => switch (form) {
+    MedicationForm.tablet   => 'Tablet',
+    MedicationForm.capsule  => 'Capsule',
+    MedicationForm.liquid   => 'Liquid',
+    MedicationForm.injection => 'Injection',
+    MedicationForm.drops    => 'Drops',
+    MedicationForm.inhaler  => 'Inhaler',
+    MedicationForm.patch    => 'Patch',
+    MedicationForm.other    => 'Other',
+  };
+
+  String get formLabelAr => switch (form) {
+    MedicationForm.tablet   => 'قرص',
+    MedicationForm.capsule  => 'كبسولة',
+    MedicationForm.liquid   => 'سائل',
+    MedicationForm.injection => 'حقنة',
+    MedicationForm.drops    => 'قطرات',
+    MedicationForm.inhaler  => 'بخاخ',
+    MedicationForm.patch    => 'لصقة',
+    MedicationForm.other    => 'أخرى',
+  };
+
+  String get frequencyLabel {
+    final n = reminderTimes.length;
+    return switch (n) {
+      1 => 'Once daily',
+      2 => 'Twice daily',
+      3 => '3 times daily',
+      _ => '$n times daily',
+    };
+  }
+
+  String get frequencyLabelAr {
+    final n = reminderTimes.length;
+    return switch (n) {
+      1 => 'مرة يومياً',
+      2 => 'مرتين يومياً',
+      3 => '3 مرات يومياً',
+      _ => '$n مرات يومياً',
+    };
+  }
 
   Map<String, dynamic> toMap() => {
     'id': id,
     'name': name,
     'nameAr': nameAr,
     'dosage': dosage,
-    'form': form,
-    'formAr': formAr,
+    'form': form.name,
     'indication': indication,
     'indicationAr': indicationAr,
-    'prescribedBy': prescribedBy,
-    'schedule': schedule.toMap(),
+    'reminderTimes': reminderTimes.map((t) => t.toMap()).toList(),
     'reminderType': reminderType.name,
     'status': status.name,
-    'prescribedDate': prescribedDate.toIso8601String(),
+    'startDate': startDate.toIso8601String(),
     'notes': notes,
     'notesAr': notesAr,
   };
 
-  factory Medication.fromMap(Map<String, dynamic> map) => Medication(
-    id: map['id'],
-    name: map['name'],
-    nameAr: map['nameAr'],
-    dosage: map['dosage'],
-    form: map['form'],
-    formAr: map['formAr'],
-    indication: map['indication'],
-    indicationAr: map['indicationAr'],
-    prescribedBy: map['prescribedBy'],
-    schedule: MedicationSchedule.fromMap(map['schedule']),
-    reminderType: ReminderType.values.byName(map['reminderType']),
-    status: MedicationStatus.values.byName(map['status']),
-    prescribedDate: DateTime.parse(map['prescribedDate']),
-    notes: map['notes'],
-    notesAr: map['notesAr'],
+  factory Medication.fromMap(Map<String, dynamic> m) => Medication(
+    id: m['id'],
+    name: m['name'],
+    nameAr: m['nameAr'] ?? m['name'],
+    dosage: m['dosage'],
+    form: MedicationForm.values.byName(m['form']),
+    indication: m['indication'] ?? '',
+    indicationAr: m['indicationAr'] ?? '',
+    reminderTimes: (m['reminderTimes'] as List)
+        .map((t) => ReminderTime.fromMap(t))
+        .toList(),
+    reminderType: ReminderType.values.byName(m['reminderType']),
+    status: MedicationStatus.values.byName(m['status']),
+    startDate: DateTime.parse(m['startDate']),
+    notes: m['notes'],
+    notesAr: m['notesAr'],
   );
 
   Medication copyWith({
+    String? name,
+    String? nameAr,
+    String? dosage,
+    MedicationForm? form,
+    String? indication,
+    String? indicationAr,
+    List<ReminderTime>? reminderTimes,
     ReminderType? reminderType,
     MedicationStatus? status,
     String? notes,
@@ -113,18 +151,16 @@ class Medication {
   }) =>
       Medication(
         id: id,
-        name: name,
-        nameAr: nameAr,
-        dosage: dosage,
-        form: form,
-        formAr: formAr,
-        indication: indication,
-        indicationAr: indicationAr,
-        prescribedBy: prescribedBy,
-        schedule: schedule,
+        name: name ?? this.name,
+        nameAr: nameAr ?? this.nameAr,
+        dosage: dosage ?? this.dosage,
+        form: form ?? this.form,
+        indication: indication ?? this.indication,
+        indicationAr: indicationAr ?? this.indicationAr,
+        reminderTimes: reminderTimes ?? this.reminderTimes,
         reminderType: reminderType ?? this.reminderType,
         status: status ?? this.status,
-        prescribedDate: prescribedDate,
+        startDate: startDate,
         notes: notes ?? this.notes,
         notesAr: notesAr ?? this.notesAr,
       );
