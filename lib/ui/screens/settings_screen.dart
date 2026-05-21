@@ -1,7 +1,3 @@
-// lib/ui/screens/settings_screen.dart
-// FR1 — Patient Account Provisioning (Profile Info)
-// NFR — Accessibility (Arabic, Fonts, Contrast, Biometrics)
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../widgets/shared_widgets.dart';
@@ -48,7 +44,7 @@ class SettingsScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children:[
                         Text(
-                          isAr ? (patient?.nameAr ?? 'أحمد حسن') : (patient?.name ?? 'Ahmed Hassan'),
+                          patient?.name ?? (isAr ? 'أحمد حسن' : 'Ahmed Hassan'),
                           style: AppTextStyles.screenTitle.copyWith(fontSize: 18),
                         ),
                         Text(
@@ -85,12 +81,6 @@ class SettingsScreen extends StatelessWidget {
                     title: isAr ? 'تباين عالي' : 'High Contrast Mode',
                     value: auth.highContrast,
                     onChanged: (_) => auth.toggleHighContrast(),
-                  ),
-                  const Divider(height: 1, color: AppColors.grayLight),
-                  ToggleRow(
-                    title: isAr ? 'تسجيل الدخول بالبصمة' : 'Biometric Login',
-                    value: auth.biometricEnabled,
-                    onChanged: (_) => auth.toggleBiometric(),
                   ),
                 ],
               ),

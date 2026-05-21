@@ -19,7 +19,7 @@ class Caregiver {
     final parts = name.trim().split(' ');
     return parts.length >= 2
         ? '${parts[0][0]}${parts[1][0]}'.toUpperCase()
-        : name.substring(0, 2).toUpperCase();
+        : name.length >= 2 ? name.substring(0, 2).toUpperCase() : name.toUpperCase();
   }
 
   bool get receivesAlerts => permission != NotificationPermission.none;
@@ -44,8 +44,9 @@ class Caregiver {
 class PatientUser {
   final String id;
   final String name;
+  final String? nameAr;
   final String phone;
-  final String passwordHash;   // stored locally — hashed in Step 5
+  final String passwordHash;
   final DateTime? dateOfBirth;
   final String? chronicCondition;
   final List<Caregiver> caregivers;
@@ -58,6 +59,7 @@ class PatientUser {
   const PatientUser({
     required this.id,
     required this.name,
+    this.nameAr,
     required this.phone,
     required this.passwordHash,
     this.dateOfBirth,
@@ -74,11 +76,11 @@ class PatientUser {
     final parts = name.trim().split(' ');
     return parts.length >= 2
         ? '${parts[0][0]}${parts[1][0]}'.toUpperCase()
-        : name.substring(0, 2).toUpperCase();
+        : name.length >= 2 ? name.substring(0, 2).toUpperCase() : name.toUpperCase();
   }
 
   Map<String, dynamic> toMap() => {
-    'id': id, 'name': name, 'phone': phone, 'passwordHash': passwordHash,
+    'id': id, 'name': name, 'nameAr': nameAr, 'phone': phone, 'passwordHash': passwordHash,
     'dateOfBirth': dateOfBirth?.toIso8601String(),
     'chronicCondition': chronicCondition,
     'caregivers': caregivers.map((c) => c.toMap()).toList(),
@@ -89,7 +91,7 @@ class PatientUser {
   };
 
   factory PatientUser.fromMap(Map<String, dynamic> m) => PatientUser(
-    id: m['id'], name: m['name'], phone: m['phone'],
+    id: m['id'], name: m['name'], nameAr: m['nameAr'], phone: m['phone'],
     passwordHash: m['passwordHash'] ?? '',
     dateOfBirth: m['dateOfBirth'] != null ? DateTime.parse(m['dateOfBirth']) : null,
     chronicCondition: m['chronicCondition'],
@@ -103,14 +105,14 @@ class PatientUser {
   );
 
   PatientUser copyWith({
-    String? name, String? phone, DateTime? dateOfBirth,
+    String? name, String? nameAr, String? phone, DateTime? dateOfBirth,
     String? chronicCondition, List<Caregiver>? caregivers,
     bool? arabicMode, bool? largeFonts, bool? highContrast,
     bool? caregiverAlertsEnabled,
   }) =>
       PatientUser(
         id: id, passwordHash: passwordHash, createdAt: createdAt,
-        name: name ?? this.name, phone: phone ?? this.phone,
+        name: name ?? this.name, nameAr: nameAr ?? this.nameAr, phone: phone ?? this.phone,
         dateOfBirth: dateOfBirth ?? this.dateOfBirth,
         chronicCondition: chronicCondition ?? this.chronicCondition,
         caregivers: caregivers ?? this.caregivers,

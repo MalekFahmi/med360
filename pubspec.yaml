@@ -14,7 +14,7 @@ dependencies:
   provider: ^6.1.2
 
   # Local notifications — FR4 (Reminder Generation)
-  flutter_local_notifications: ^20.1.0
+  flutter_local_notifications: 20.1.0
 
   # Local database — Reliability NFR (works offline)
   sqflite: ^2.3.3+1
