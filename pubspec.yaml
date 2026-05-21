@@ -1,0 +1,44 @@
+name: med360
+description: MED360 — Arabic Medication Adherence Reminder App (Graduation Project)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  provider: ^6.1.2
+
+  # Local notifications — FR4 (Reminder Generation)
+  flutter_local_notifications: ^20.1.0
+
+  # Local database — Reliability NFR (works offline)
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+
+  # Arabic / RTL localization — Accessibility NFR
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+
+  # Shared preferences — store user settings (arabic mode, biometric toggle)
+  shared_preferences: ^2.3.2
+
+  # Icons
+  cupertino_icons: ^1.0.8
+  timezone: ^0.10.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Localization files (Arabic + English)
+  generate: true
