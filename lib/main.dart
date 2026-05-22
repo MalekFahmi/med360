@@ -1,4 +1,3 @@
-// main.dart — App entry point
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
