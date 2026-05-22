@@ -183,32 +183,35 @@ class _CaregiverFormSheet extends StatefulWidget {
 
 class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _relationCtrl = TextEditingController();
-  NotificationPermission _permission = NotificationPermission.missedDoseOnly;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
     _relationCtrl.dispose();
     super.dispose();
   }
 
-  void _save() {
+  void _save() async {
     if (!_formKey.currentState!.validate()) return;
-    final phone = _phoneCtrl.text.trim().replaceAll(RegExp(r'\s+'), '');
-    Navigator.pop(
-      context,
-      Caregiver(
-        id: phone,
-        name: _nameCtrl.text.trim(),
-        phone: phone,
-        relationship: _relationCtrl.text.trim(),
-        permission: _permission,
-      ),
+    setState(() => _isSubmitting = true);
+
+    final auth = context.read<AuthProvider>();
+    final error = await auth.addCaregiverByEmail(
+      _emailCtrl.text.trim(),
+      _relationCtrl.text.trim(),
     );
+
+    if (mounted) {
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+        setState(() => _isSubmitting = false);
+      } else {
+        Navigator.pop(context);
+      }
+    }
   }
 
   @override
@@ -225,28 +228,20 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                isAr ? 'إضافة مقدم رعاية' : 'Add caregiver',
+                isAr ? 'إضافة مقدم رعاية مسجل' : 'Add Registered Caregiver',
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
-                controller: _nameCtrl,
-                decoration: InputDecoration(labelText: isAr ? 'الاسم الكامل' : 'Full name'),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل الاسم' : 'Enter a name')
-                        : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(labelText: isAr ? 'رقم الهاتف' : 'Phone number'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل رقم الهاتف' : 'Enter a phone number')
-                        : null,
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: isAr ? 'البريد الإلكتروني' : 'Caregiver Email',
+                  hintText: 'email@example.com',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? (isAr ? 'أدخل البريد الإلكتروني' : 'Enter email')
+                    : null,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
@@ -256,35 +251,15 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
                     ? (isAr ? 'أدخل صلة القرابة' : 'Enter a relationship')
                     : null,
               ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<NotificationPermission>(
-                initialValue: _permission,
-                decoration: InputDecoration(labelText: isAr ? 'الصلاحية' : 'Permission'),
-                items: [
-                  DropdownMenuItem(
-                    value: NotificationPermission.missedDoseOnly,
-                    child: Text(isAr ? 'تنبيهات فقط' : 'Alerts only'),
-                  ),
-                  DropdownMenuItem(
-                    value: NotificationPermission.all,
-                    child: Text(isAr ? 'تقارير وتنبيهات' : 'Full access'),
-                  ),
-                  DropdownMenuItem(
-                    value: NotificationPermission.none,
-                    child: Text(isAr ? 'متوقف' : 'Muted'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _permission = value);
-                },
-              ),
               const SizedBox(height: AppSpacing.xl),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.check_rounded),
-                  label: Text(isAr ? 'حفظ مقدم الرعاية' : 'Save caregiver'),
+                  onPressed: _isSubmitting ? null : _save,
+                  icon: _isSubmitting
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.link_rounded),
+                  label: Text(isAr ? 'ربط مقدم الرعاية' : 'Link Caregiver'),
                   style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
                 ),
               ),

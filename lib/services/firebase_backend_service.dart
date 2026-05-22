@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
 import 'notification_service.dart';
+import '../firebase_options.dart';
 
 class FirebaseBackendService {
   static final FirebaseBackendService _instance =
@@ -30,7 +31,7 @@ class FirebaseBackendService {
     } else if (data['type'] == 'caregiverAdded') {
       final isAr = data['language'] == 'ar';
       NotificationService().showCaregiverAlert(
-        medicationName: isAr ? 'تمت إضافتك كمراقب' : 'You were added as a caregiver',
+        medicationName: isAr ? 'تمت إضافتك كمراقب' : 'Linked as Caregiver',
         patientName: data['patientName'] ?? 'Patient',
         isArabic: isAr,
       );
@@ -42,7 +43,9 @@ class FirebaseBackendService {
     _initialized = true;
 
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       _firestore = FirebaseFirestore.instance;
       _messaging = FirebaseMessaging.instance;
 
@@ -96,6 +99,25 @@ class FirebaseBackendService {
     }, SetOptions(merge: true));
   }
 
+  Future<void> updateCaregiverToken(String uid) async {
+    if (!_enabled || _firestore == null) return;
+
+    final token = await _messaging?.getToken();
+    if (token != null) {
+      await _firestore!.collection('users').doc(uid).set({
+        'fcmToken': token,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    _messaging?.onTokenRefresh.listen((newToken) {
+      _firestore!.collection('users').doc(uid).set({
+        'fcmToken': newToken,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
+  }
+
   Future<void> upsertCaregiver({
     required String patientId,
     required Caregiver caregiver,
@@ -128,6 +150,40 @@ class FirebaseBackendService {
         .collection('caregivers')
         .doc(caregiverId)
         .delete();
+
+    // Also remove from many-to-many relationship
+    final relationships = await _firestore!
+        .collection('patientCaregivers')
+        .where('patientId', isEqualTo: patientId)
+        .where('caregiverUid', isEqualTo: caregiverId)
+        .get();
+    for (var doc in relationships.docs) {
+      await doc.reference.delete();
+    }
+  }
+
+  Future<Map<String, dynamic>?> searchCaregiverByEmail(String email) async {
+    if (!_enabled || _firestore == null) return null;
+
+    final result = await _firestore!
+        .collection('users')
+        .where('email', isEqualTo: email)
+        .where('role', isEqualTo: 'caregiver')
+        .limit(1)
+        .get();
+
+    if (result.docs.isEmpty) return null;
+    return result.docs.first.data();
+  }
+
+  Future<void> linkPatientToCaregiver(String patientId, String caregiverUid) async {
+    if (!_enabled || _firestore == null) return;
+
+    await _firestore!.collection('patientCaregivers').add({
+      'patientId': patientId,
+      'caregiverUid': caregiverUid,
+      'linkedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> sendMissedDoseAlert({

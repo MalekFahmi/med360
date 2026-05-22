@@ -15,18 +15,28 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey   = GlobalKey<FormState>();
   final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
   bool _obscure    = true;
+  bool _isCaregiverMode = false;
 
   @override
-  void dispose() { _phoneCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
+  void dispose() { _phoneCtrl.dispose(); _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    final ok = await context.read<AuthProvider>().login(
-      phone: _phoneCtrl.text.trim(),
-      password: _passCtrl.text,
-    );
+    bool ok;
+    if (_isCaregiverMode) {
+      ok = await context.read<AuthProvider>().caregiverLogin(
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text,
+      );
+    } else {
+      ok = await context.read<AuthProvider>().login(
+        phone: _phoneCtrl.text.trim(),
+        password: _passCtrl.text,
+      );
+    }
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(context.read<AuthProvider>().errorMessage ?? 'Login failed'),
@@ -60,18 +70,42 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: AppSpacing.xxl),
 
                 AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Sign in', style: AppTextStyles.screenTitle.copyWith(fontSize: 18)),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Sign in', style: AppTextStyles.screenTitle.copyWith(fontSize: 18)),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.people_outline, size: 14),
+                      Switch(
+                        value: _isCaregiverMode,
+                        onChanged: (v) => setState(() => _isCaregiverMode = v),
+                        activeThumbColor: AppColors.teal,
+                      ),
+                    ]),
+                  ]),
+                  Text(_isCaregiverMode ? 'Caregiver access' : 'Patient access', style: AppTextStyles.screenSub.copyWith(fontSize: 11)),
                   const SizedBox(height: AppSpacing.lg),
 
-                  TextFormField(
-                    controller: _phoneCtrl,
-                    keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(labelText: 'Phone number', prefixIcon: const Icon(Icons.phone_outlined, size: 20),
-                      border: const OutlineInputBorder(borderRadius: AppRadius.md),
-                      enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null,
-                  ),
+                  if (!_isCaregiverMode)
+                    TextFormField(
+                      controller: _phoneCtrl,
+                      key: const ValueKey('phone'),
+                      keyboardType: TextInputType.phone,
+                      decoration: InputDecoration(labelText: 'Phone number', prefixIcon: const Icon(Icons.phone_outlined, size: 20),
+                        border: const OutlineInputBorder(borderRadius: AppRadius.md),
+                        enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null,
+                    )
+                  else
+                    TextFormField(
+                      controller: _emailCtrl,
+                      key: const ValueKey('email'),
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: InputDecoration(labelText: 'Email', prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                        border: const OutlineInputBorder(borderRadius: AppRadius.md),
+                        enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your email' : null,
+                    ),
                   const SizedBox(height: AppSpacing.md),
 
                   TextFormField(

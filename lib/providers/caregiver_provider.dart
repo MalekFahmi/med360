@@ -27,13 +27,13 @@ class CaregiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void listenToInboundAlerts(String userPhone) {
+  void listenToInboundAlerts(String uid) {
     _subscription?.cancel();
     final firestore = FirebaseFirestore.instance;
 
     _subscription = firestore
         .collection('caregiverInboxes')
-        .doc(userPhone)
+        .doc(uid)
         .collection('notifications')
         .orderBy('sentAt', descending: true)
         .snapshots()
@@ -60,7 +60,7 @@ class CaregiverProvider extends ChangeNotifier {
     return CaregiverNotification(
       id: data['id'] ?? '',
       caregiverId: data['caregiverId'] ?? '',
-      caregiverName: data['caregiverName'] ?? data['patientName'] ?? '',
+      caregiverName: data['patientName'] ?? data['caregiverName'] ?? '',
       medicationId: data['medicationId'],
       medicationName: data['medicationName'],
       missedAt: data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,

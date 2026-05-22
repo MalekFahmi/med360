@@ -16,27 +16,39 @@ class _SignupScreenState extends State<SignupScreen> {
   final _formKey   = GlobalKey<FormState>();
   final _nameCtrl  = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
   final _condCtrl  = TextEditingController();
   bool _obscure    = true;
+  bool _isCaregiverMode = false;
   DateTime? _dob;
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _phoneCtrl.dispose();
+    _nameCtrl.dispose(); _phoneCtrl.dispose(); _emailCtrl.dispose();
     _passCtrl.dispose(); _condCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final ok = await context.read<AuthProvider>().signUp(
-      name: _nameCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim(),
-      password: _passCtrl.text,
-      dateOfBirth: _dob,
-      chronicCondition: _condCtrl.text.trim().isEmpty ? null : _condCtrl.text.trim(),
-    );
+    bool ok;
+    if (_isCaregiverMode) {
+      ok = await context.read<AuthProvider>().caregiverSignUp(
+        name: _nameCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text,
+        phone: _phoneCtrl.text.trim(),
+      );
+    } else {
+      ok = await context.read<AuthProvider>().signUp(
+        name: _nameCtrl.text.trim(),
+        phone: _phoneCtrl.text.trim(),
+        password: _passCtrl.text,
+        dateOfBirth: _dob,
+        chronicCondition: _condCtrl.text.trim().isEmpty ? null : _condCtrl.text.trim(),
+      );
+    }
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(context.read<AuthProvider>().errorMessage ?? 'Sign up failed'),
@@ -88,7 +100,18 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: AppSpacing.xxl),
 
                 AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Create account', style: AppTextStyles.screenTitle.copyWith(fontSize: 18)),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Create account', style: AppTextStyles.screenTitle.copyWith(fontSize: 18)),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.people_outline, size: 14),
+                      Switch(
+                        value: _isCaregiverMode,
+                        onChanged: (v) => setState(() => _isCaregiverMode = v),
+                        activeThumbColor: AppColors.teal,
+                      ),
+                    ]),
+                  ]),
+                  Text(_isCaregiverMode ? 'Caregiver account' : 'Patient account', style: AppTextStyles.screenSub.copyWith(fontSize: 11)),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Name
@@ -113,6 +136,17 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
+                  if (_isCaregiverMode) ...[
+                    // Email
+                    TextFormField(
+                      controller: _emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: _inputDec('Email address', Icons.email_outlined),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your email' : null,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+
                   // Password
                   TextFormField(
                     controller: _passCtrl,
@@ -131,6 +165,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
+                  if (!_isCaregiverMode) ...[
                   // Date of birth (optional)
                   GestureDetector(
                     onTap: _pickDob,
@@ -163,6 +198,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     textCapitalization: TextCapitalization.sentences,
                     decoration: _inputDec('Chronic condition (optional)', Icons.medical_information_outlined),
                   ),
+                  ],
                   const SizedBox(height: AppSpacing.xl),
 
                   // Submit

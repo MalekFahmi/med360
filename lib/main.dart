@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'services/local_db_service.dart';
 import 'services/notification_service.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/firebase_backend_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/medication_provider.dart';
@@ -18,9 +19,18 @@ import 'ui/screens/medications_screen.dart';
 import 'ui/screens/adherence_screen.dart';
 import 'ui/screens/caregiver_screen.dart';
 import 'ui/screens/settings_screen.dart';
+import 'ui/screens/caregiver_dashboard_screen.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // If you're going to use other Firebase services in the background, such as Firestore,
+  // make sure you call `initializeApp` before using other Firebase services.
+  // In this app, the notification is handled by the OS if it contains a 'notification' block.
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   await NotificationService().init();
   await FirebaseBackendService().init();
   runApp(const Med360App());
@@ -78,7 +88,7 @@ class _AppRouter extends StatelessWidget {
     final auth = context.watch<AuthProvider>();
     return switch (auth.status) {
       AuthStatus.initial || AuthStatus.loading => const Scaffold(body: Center(child: CircularProgressIndicator())),
-      AuthStatus.authenticated => const MainShell(),
+      AuthStatus.authenticated => auth.isCaregiver ? const CaregiverDashboardScreen() : const MainShell(),
       _ => const AuthScreen(),
     };
   }
@@ -118,16 +128,21 @@ class _MainShellState extends State<MainShell> {
   Future<void> _loadData() async {
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
+    final medicationProvider = context.read<MedicationProvider>();
+    final adherenceProvider = context.read<AdherenceProvider>();
+    final reportProvider = context.read<ReportProvider>();
+    final caregiverProvider = context.read<CaregiverProvider>();
+
+    if (auth.isCaregiver) {
+      final uid = auth.caregiverUser!['uid'];
+      await FirebaseBackendService().updateCaregiverToken(uid);
+      caregiverProvider.listenToInboundAlerts(uid);
+    }
+
     if (auth.patient != null) {
       final pId = auth.patient!.id;
-      final phone = auth.patient!.phone;
-      final medicationProvider = context.read<MedicationProvider>();
-      final adherenceProvider = context.read<AdherenceProvider>();
-      final reportProvider = context.read<ReportProvider>();
-      final caregiverProvider = context.read<CaregiverProvider>();
 
       await FirebaseBackendService().registerPatientDevice(auth.patient!);
-      caregiverProvider.listenToInboundAlerts(phone);
       await NotificationService().requestPermissions();
       await medicationProvider.loadMedications(pId);
       final meds = medicationProvider.medications;
