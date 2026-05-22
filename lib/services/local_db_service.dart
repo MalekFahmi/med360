@@ -110,11 +110,12 @@ class LocalDbService {
       CREATE TABLE caregiver_notifications (
         id TEXT PRIMARY KEY,
         patientId TEXT NOT NULL,
+        patientName TEXT NOT NULL,
         caregiverId TEXT NOT NULL,
         caregiverName TEXT NOT NULL,
-        medicationId TEXT NOT NULL,
-        medicationName TEXT NOT NULL,
-        missedAt TEXT NOT NULL,
+        medicationId TEXT,
+        medicationName TEXT,
+        missedAt TEXT,
         sentAt TEXT NOT NULL,
         channel TEXT NOT NULL,
         acknowledged INTEGER DEFAULT 0,
@@ -301,31 +302,45 @@ class LocalDbService {
       String patientId, CaregiverNotification n) async {
     final d = await db;
     await d.insert('caregiver_notifications', {
-      'id': n.id, 'patientId': patientId, 'caregiverId': n.caregiverId,
-      'caregiverName': n.caregiverName, 'medicationId': n.medicationId,
+      'id': n.id,
+      'patientId': n.patientId,
+      'patientName': n.patientName,
+      'caregiverId': n.caregiverId,
+      'caregiverName': n.caregiverName,
+      'medicationId': n.medicationId,
       'medicationName': n.medicationName,
       'missedAt': n.missedAt?.toIso8601String(),
-      'sentAt': n.sentAt.toIso8601String(), 'channel': n.channel.name,
+      'sentAt': n.sentAt.toIso8601String(),
+      'channel': n.channel.name,
       'acknowledged': n.acknowledged ? 1 : 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<CaregiverNotification>> getCaregiverNotifications(
-      String patientId) async {
+      String userId) async {
     final d = await db;
+    // For local simplicity, we'll fetch all; ideally we filter by patientId OR caregiverId
     final rows = await d.query('caregiver_notifications',
-        where: 'patientId = ?', whereArgs: [patientId],
+        where: 'patientId = ? OR caregiverId = ?',
+        whereArgs: [userId, userId],
         orderBy: 'sentAt DESC');
-    return rows.map((r) => CaregiverNotification(
-      id: r['id'] as String, caregiverId: r['caregiverId'] as String,
-      caregiverName: r['caregiverName'] as String,
-      medicationId: r['medicationId'] as String?,
-      medicationName: r['medicationName'] as String?,
-      missedAt: r['missedAt'] != null ? DateTime.parse(r['missedAt'] as String) : null,
-      sentAt: DateTime.parse(r['sentAt'] as String),
-      channel: NotificationChannel.values.byName(r['channel'] as String),
-      acknowledged: r['acknowledged'] == 1,
-    )).toList();
+    return rows
+        .map((r) => CaregiverNotification(
+              id: r['id'] as String,
+              caregiverId: r['caregiverId'] as String,
+              caregiverName: r['caregiverName'] as String,
+              patientId: r['patientId'] as String,
+              patientName: r['patientName'] as String,
+              medicationId: r['medicationId'] as String?,
+              medicationName: r['medicationName'] as String?,
+              missedAt: r['missedAt'] != null
+                  ? DateTime.parse(r['missedAt'] as String)
+                  : null,
+              sentAt: DateTime.parse(r['sentAt'] as String),
+              channel: NotificationChannel.values.byName(r['channel'] as String),
+              acknowledged: r['acknowledged'] == 1,
+            ))
+        .toList();
   }
 
   Future<void> markNotificationRead(String notifId) async {

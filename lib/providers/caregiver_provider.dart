@@ -27,6 +27,12 @@ class CaregiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clear() {
+    _notifications = [];
+    _subscription?.cancel();
+    notifyListeners();
+  }
+
   void listenToInboundAlerts(String uid) {
     _subscription?.cancel();
     final firestore = FirebaseFirestore.instance;
@@ -60,7 +66,9 @@ class CaregiverProvider extends ChangeNotifier {
     return CaregiverNotification(
       id: data['id'] ?? '',
       caregiverId: data['caregiverId'] ?? '',
-      caregiverName: data['patientName'] ?? data['caregiverName'] ?? '',
+      caregiverName: data['caregiverName'] ?? '',
+      patientId: data['patientId'] ?? '',
+      patientName: data['patientName'] ?? '',
       medicationId: data['medicationId'],
       medicationName: data['medicationName'],
       missedAt: data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,
@@ -92,9 +100,14 @@ class CaregiverProvider extends ChangeNotifier {
         final cg = allCaregivers.firstWhere((c) => c.id == id);
         final notif = CaregiverNotification(
           id: 'N-${DateTime.now().millisecondsSinceEpoch}-$id',
-          caregiverId: id, caregiverName: cg.name,
-          medicationId: medicationId, medicationName: medicationName,
-          missedAt: missedAt, sentAt: DateTime.now(),
+          caregiverId: id,
+          caregiverName: cg.name,
+          patientId: patientId,
+          patientName: patientName,
+          medicationId: medicationId,
+          medicationName: medicationName,
+          missedAt: missedAt,
+          sentAt: DateTime.now(),
           channel: NotificationChannel.both,
         );
         await _db.insertCaregiverNotification(patientId, notif);

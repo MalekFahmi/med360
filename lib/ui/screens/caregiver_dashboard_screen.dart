@@ -4,16 +4,41 @@ import '../widgets/shared_widgets.dart';
 import '../theme/app_theme.dart';
 import '../../providers/providers.dart';
 import '../../models/models.dart';
+import '../../services/firebase_backend_service.dart';
 
-class CaregiverDashboardScreen extends StatelessWidget {
+class CaregiverDashboardScreen extends StatefulWidget {
   const CaregiverDashboardScreen({super.key});
+
+  @override
+  State<CaregiverDashboardScreen> createState() => _CaregiverDashboardScreenState();
+}
+
+class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initData());
+  }
+
+  void _initData() async {
+    final auth = context.read<AuthProvider>();
+    if (auth.isCaregiver) {
+      final uid = auth.caregiverUser!['uid'];
+      await FirebaseBackendService().updateCaregiverToken(uid);
+      if (mounted) {
+        context.read<CaregiverProvider>().listenToInboundAlerts(uid);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final cgProv = context.watch<CaregiverProvider>();
     final isAr = auth.arabicMode;
-    final user = auth.caregiverUser!;
+    final user = auth.caregiverUser;
+
+    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       backgroundColor: AppColors.grayLight,
@@ -26,7 +51,10 @@ class CaregiverDashboardScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: () => auth.logout(),
+            onPressed: () {
+              context.read<CaregiverProvider>().clear();
+              auth.logout();
+            },
           ),
         ],
       ),
@@ -87,7 +115,7 @@ class _NotificationTile extends StatelessWidget {
                     style: AppTextStyles.medName,
                   ),
                   Text(
-                    isAr ? 'المريض: ${notification.caregiverName}' : 'Patient: ${notification.caregiverName}',
+                    isAr ? 'المريض: ${notification.patientName}' : 'Patient: ${notification.patientName}',
                     style: AppTextStyles.medDetail,
                   ),
                   Text(

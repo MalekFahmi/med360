@@ -10,14 +10,14 @@ service cloud.firestore {
 
     // Patients can read/write their own patient data
     match /patients/{patientId} {
-      allow read, write: if request.auth != null; // Simplified for demo, ideally linked to AuthProvider ID
+      allow read, write: if request.auth != null && request.auth.uid == patientId;
 
       match /caregivers/{caregiverId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if request.auth != null && (request.auth.uid == patientId || request.auth.uid == caregiverId);
       }
 
       match /caregiverNotifications/{notificationId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if request.auth != null && request.auth.uid == patientId;
       }
     }
 
