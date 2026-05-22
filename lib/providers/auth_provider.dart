@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
@@ -81,6 +82,7 @@ class AuthProvider extends ChangeNotifier {
       );
 
       await _db.insertPatient(newPatient);
+      await FirebaseBackendService().registerPatientDevice(newPatient);
       _patient = newPatient;
 
       final prefs = await SharedPreferences.getInstance();
@@ -113,6 +115,7 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _patient = p;
+      await FirebaseBackendService().registerPatientDevice(p);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', p.id);
 
@@ -154,6 +157,10 @@ class AuthProvider extends ChangeNotifier {
   // ── Caregiver management ──────────────────────────────────────────────────
   Future<void> addCaregiver(Caregiver cg) async {
     await _db.insertCaregiver(_patient!.id, cg);
+    await FirebaseBackendService().upsertCaregiver(
+      patientId: _patient!.id,
+      caregiver: cg,
+    );
     final updated = _patient!.copyWith(
         caregivers: [...caregivers, cg]);
     _patient = updated;
@@ -162,6 +169,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> removeCaregiver(String caregiverId) async {
     await _db.deleteCaregiver(caregiverId);
+    await FirebaseBackendService().removeCaregiver(
+      patientId: _patient!.id,
+      caregiverId: caregiverId,
+    );
     final updated = _patient!.copyWith(
         caregivers: caregivers.where((c) => c.id != caregiverId).toList());
     _patient = updated;
@@ -174,6 +185,10 @@ class AuthProvider extends ChangeNotifier {
         c.id == caregiverId ? c.copyWith(permission: perm) : c).toList();
     await _db.insertCaregiver(_patient!.id,
         updated.firstWhere((c) => c.id == caregiverId));
+    await FirebaseBackendService().upsertCaregiver(
+      patientId: _patient!.id,
+      caregiver: updated.firstWhere((c) => c.id == caregiverId),
+    );
     _patient = _patient!.copyWith(caregivers: updated);
     notifyListeners();
   }

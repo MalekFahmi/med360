@@ -4,12 +4,10 @@ import '../services/local_db_service.dart';
 import 'adherence_provider.dart' show LoadStatus;
 
 class ReportProvider extends ChangeNotifier {
-  final LocalDbService _db;
-  ReportProvider(this._db);
+  ReportProvider(LocalDbService db);
 
-  LoadStatus _status = LoadStatus.initial;
+  final LoadStatus _status = LoadStatus.initial;
   List<MonthlyAdherenceSummary> _reports = [];
-  String? _errorMessage;
 
   LoadStatus get status  => _status;
   bool get isLoading     => _status == LoadStatus.loading;

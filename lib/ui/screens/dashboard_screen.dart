@@ -16,7 +16,7 @@ class DashboardScreen extends StatelessWidget {
         content: Text('✓  ${dose.medicationName} taken'),
         backgroundColor: AppColors.teal,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
+        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
         margin: const EdgeInsets.all(16),
         duration: const Duration(seconds: 2),
       ));
@@ -42,15 +42,17 @@ class DashboardScreen extends StatelessWidget {
         medicationId: dose.medicationId,
         medicationName: dose.medicationName,
         missedAt: DateTime.now(),
+        patientName: auth.patient?.name ?? 'Patient',
+        isArabic: auth.arabicMode,
       );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('⚠  Dose missed — caregiver notified'),
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('⚠  Dose missed — caregiver notified'),
           backgroundColor: AppColors.amber,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
-          margin: const EdgeInsets.all(16),
-          duration: const Duration(seconds: 3),
+          margin: EdgeInsets.all(16),
+          duration: Duration(seconds: 3),
         ));
       }
     }
@@ -121,12 +123,12 @@ class DashboardScreen extends StatelessWidget {
               const SizedBox(height: AppSpacing.sm),
 
               if (adh.isLoading)
-                ...List.generate(3, (_) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                ...List.generate(3, (_) => const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
                   child: AppCard(child: Row(children: [
-                    const SkeletonBox(height: 44, width: 44, radius: AppRadius.md),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+                    SkeletonBox(height: 44, width: 44, radius: AppRadius.md),
+                    SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       SkeletonBox(height: 14), SizedBox(height: 6), SkeletonBox(height: 11),
                     ])),
                   ])),

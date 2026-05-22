@@ -32,7 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
         content: Text(context.read<AuthProvider>().errorMessage ?? 'Login failed'),
         backgroundColor: AppColors.red,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
+        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
         margin: const EdgeInsets.all(AppSpacing.lg),
       ));
     }
@@ -67,8 +67,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _phoneCtrl,
                     keyboardType: TextInputType.phone,
                     decoration: InputDecoration(labelText: 'Phone number', prefixIcon: const Icon(Icons.phone_outlined, size: 20),
-                      border: OutlineInputBorder(borderRadius: AppRadius.md),
-                      enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withOpacity(0.2))),
+                      border: const OutlineInputBorder(borderRadius: AppRadius.md),
+                      enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
                     validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null,
                   ),
@@ -80,8 +80,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: InputDecoration(labelText: 'Password', prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
                       suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                         onPressed: () => setState(() => _obscure = !_obscure)),
-                      border: OutlineInputBorder(borderRadius: AppRadius.md),
-                      enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withOpacity(0.2))),
+                      border: const OutlineInputBorder(borderRadius: AppRadius.md),
+                      enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
                     validator: (v) => (v == null || v.isEmpty) ? 'Enter your password' : null,
                   ),
@@ -92,7 +92,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: auth.isLoading ? null : _login,
                       style: FilledButton.styleFrom(backgroundColor: AppColors.teal,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: AppRadius.md)),
+                        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md)),
                       child: auth.isLoading
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
                           : const Text('Log in', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),

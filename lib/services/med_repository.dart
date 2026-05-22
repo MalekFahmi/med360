@@ -1,9 +1,6 @@
-// Abstract interface that both StaticDataService and (future) ApiService implement.
-// Your providers and screens depend ONLY on this — never on the concrete class.
-// When the LIMU Care API is ready:
-//   1. Create ApiService that extends MedRepository
-//   2. Change one line in main.dart: Provider(create: (_) => ApiService())
-//   3. Everything else stays the same.
+// Optional read-only repository contract for reports/export features.
+// MED360 now runs as a standalone app: patients create their own accounts,
+// enter medication schedules, confirm doses, and manage caregivers locally.
 
 import '../models/models.dart';
 

@@ -42,7 +42,7 @@ class _SignupScreenState extends State<SignupScreen> {
         content: Text(context.read<AuthProvider>().errorMessage ?? 'Sign up failed'),
         backgroundColor: AppColors.red,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
+        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
         margin: const EdgeInsets.all(AppSpacing.lg),
       ));
     }
@@ -137,7 +137,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.black.withOpacity(0.2)),
+                        border: Border.all(color: Colors.black.withValues(alpha: 0.2)),
                         borderRadius: AppRadius.md,
                       ),
                       child: Row(children: [
@@ -173,7 +173,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.teal,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
+                        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
                       ),
                       child: auth.isLoading
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
@@ -201,8 +201,8 @@ class _SignupScreenState extends State<SignupScreen> {
   InputDecoration _inputDec(String label, IconData icon) => InputDecoration(
     labelText: label,
     prefixIcon: Icon(icon, size: 20),
-    border: OutlineInputBorder(borderRadius: AppRadius.md),
-    enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withOpacity(0.2))),
+    border: const OutlineInputBorder(borderRadius: AppRadius.md),
+    enabledBorder: OutlineInputBorder(borderRadius: AppRadius.md, borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
   );
 }

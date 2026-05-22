@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:med360/ui/theme/app_theme.dart';
-import '../../models/models.dart';
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
 enum BadgeVariant { green, amber, red, blue, teal, gray }
@@ -55,8 +54,8 @@ class AppCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: AppRadius.lg,
-        border: Border.all(color: Colors.black.withOpacity(0.07)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))],
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2))],
       ),
       child: onTap != null
           ? InkWell(onTap: onTap, borderRadius: AppRadius.lg, child: inner)
@@ -143,7 +142,7 @@ class MetricTile extends StatelessWidget {
   const MetricTile({super.key, required this.label, required this.value, this.valueColor = AppColors.grayDark});
   @override Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(color: AppColors.grayLight, borderRadius: AppRadius.md),
+    decoration: const BoxDecoration(color: AppColors.grayLight, borderRadius: AppRadius.md),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: AppTextStyles.metricLabel),
       const SizedBox(height: 2),
@@ -201,7 +200,7 @@ class InfoBanner extends StatelessWidget {
   const InfoBanner({super.key, required this.message, required this.color, required this.icon});
   @override Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: AppRadius.md, border: Border.all(color: color.withOpacity(0.3))),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: AppRadius.md, border: Border.all(color: color.withValues(alpha: 0.3))),
     child: Row(children: [Icon(icon, color: color, size: 16), const SizedBox(width: 10), Expanded(child: Text(message, style: TextStyle(fontSize: 12, color: color)))]),
   );
 }
@@ -211,7 +210,7 @@ class EmptyState extends StatelessWidget {
   final IconData icon; final String title; final String? subtitle; final Widget? action;
   const EmptyState({super.key, required this.icon, required this.title, this.subtitle, this.action});
   @override Widget build(BuildContext context) => Center(child: Padding(padding: const EdgeInsets.all(AppSpacing.xxl), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-    Container(width: 72, height: 72, decoration: BoxDecoration(color: AppColors.tealLight, borderRadius: AppRadius.lg), child: Icon(icon, size: 36, color: AppColors.teal)),
+    Container(width: 72, height: 72, decoration: const BoxDecoration(color: AppColors.tealLight, borderRadius: AppRadius.lg), child: Icon(icon, size: 36, color: AppColors.teal)),
     const SizedBox(height: AppSpacing.lg),
     Text(title, style: AppTextStyles.screenTitle.copyWith(fontSize: 17), textAlign: TextAlign.center),
     if (subtitle != null) ...[const SizedBox(height: 6), Text(subtitle!, style: AppTextStyles.screenSub, textAlign: TextAlign.center)],

@@ -25,12 +25,16 @@ dependencies:
     sdk: flutter
   intl: ^0.20.2
 
-  # Shared preferences — store user settings (arabic mode, biometric toggle)
+  # Shared preferences — store user settings and login session
   shared_preferences: ^2.3.2
 
   # Icons
   cupertino_icons: ^1.0.8
   timezone: ^0.10.1
+  sqflite_common_ffi_web: ^1.0.1+1
+  firebase_core: ^4.9.0
+  cloud_firestore: ^6.4.1
+  firebase_messaging: ^16.2.2
 
 dev_dependencies:
   flutter_test:

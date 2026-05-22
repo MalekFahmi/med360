@@ -6,6 +6,7 @@ plugins {
 }
 
 android {
+    
     namespace = "com.example.med360"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
@@ -24,7 +25,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.med360"
-        minSdk = flutter.minSdkVersion
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

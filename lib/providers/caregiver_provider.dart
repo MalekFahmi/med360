@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 import 'adherence_provider.dart' show LoadStatus;
 
@@ -29,6 +30,8 @@ class CaregiverProvider extends ChangeNotifier {
     required String medicationId,
     required String medicationName,
     required DateTime missedAt,
+    String patientName = 'Patient',
+    bool isArabic = false,
   }) async {
     for (final id in caregiverIds) {
       try {
@@ -41,6 +44,13 @@ class CaregiverProvider extends ChangeNotifier {
           channel: NotificationChannel.both,
         );
         await _db.insertCaregiverNotification(patientId, notif);
+        await FirebaseBackendService().sendMissedDoseAlert(
+          patientId: patientId,
+          patientName: patientName,
+          caregiverId: id,
+          notification: notif,
+          isArabic: isArabic,
+        );
         _notifications = [notif, ..._notifications];
       } catch (_) {}
     }
