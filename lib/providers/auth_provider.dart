@@ -161,6 +161,12 @@ class AuthProvider extends ChangeNotifier {
       patientId: _patient!.id,
       caregiver: cg,
     );
+    await FirebaseBackendService().sendCaregiverAddedAlert(
+      patientId: _patient!.id,
+      patientName: _patient!.name,
+      caregiverId: cg.id,
+      isArabic: arabicMode,
+    );
     final updated = _patient!.copyWith(
         caregivers: [...caregivers, cg]);
     _patient = updated;

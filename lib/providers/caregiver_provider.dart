@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../services/firebase_backend_service.dart';
@@ -10,6 +13,7 @@ class CaregiverProvider extends ChangeNotifier {
 
   List<CaregiverNotification> _notifications = [];
   LoadStatus _status = LoadStatus.initial;
+  StreamSubscription? _subscription;
 
   List<CaregiverNotification> get notifications => _notifications;
   bool get isLoading => _status == LoadStatus.loading;
@@ -21,6 +25,56 @@ class CaregiverProvider extends ChangeNotifier {
     _notifications = await _db.getCaregiverNotifications(patientId);
     _status = LoadStatus.loaded;
     notifyListeners();
+  }
+
+  void listenToInboundAlerts(String userPhone) {
+    _subscription?.cancel();
+    final firestore = FirebaseFirestore.instance;
+
+    _subscription = firestore
+        .collection('caregiverInboxes')
+        .doc(userPhone)
+        .collection('notifications')
+        .orderBy('sentAt', descending: true)
+        .snapshots()
+        .listen((snapshot) {
+      bool changed = false;
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data();
+          if (data != null) {
+            final notif = _mapFirestoreToNotification(data);
+            if (!_notifications.any((n) => n.id == notif.id)) {
+              _notifications = [notif, ..._notifications];
+              _db.insertCaregiverNotification(notif.caregiverId, notif);
+              changed = true;
+            }
+          }
+        }
+      }
+      if (changed) notifyListeners();
+    });
+  }
+
+  CaregiverNotification _mapFirestoreToNotification(Map<String, dynamic> data) {
+    return CaregiverNotification(
+      id: data['id'] ?? '',
+      caregiverId: data['caregiverId'] ?? '',
+      caregiverName: data['caregiverName'] ?? data['patientName'] ?? '',
+      medicationId: data['medicationId'],
+      medicationName: data['medicationName'],
+      missedAt: data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,
+      sentAt: (data['sentAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      channel: NotificationChannel.inApp,
+      acknowledged: data['acknowledged'] ?? false,
+      type: data['type'] ?? 'missedDose',
+    );
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
   Future<void> dispatchMissedDoseAlert({
@@ -70,5 +124,19 @@ class CaregiverProvider extends ChangeNotifier {
         .map((n) => n.copyWith(acknowledged: true))
         .toList();
     notifyListeners();
+  }
+
+  Future<void> dispatchCaregiverAddedAlert({
+    required String patientId,
+    required String patientName,
+    required String caregiverId,
+    required bool isArabic,
+  }) async {
+    await FirebaseBackendService().sendCaregiverAddedAlert(
+      patientId: patientId,
+      patientName: patientName,
+      caregiverId: caregiverId,
+      isArabic: isArabic,
+    );
   }
 }

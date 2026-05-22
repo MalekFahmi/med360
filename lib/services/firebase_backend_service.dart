@@ -19,6 +19,24 @@ class FirebaseBackendService {
 
   bool get isEnabled => _enabled;
 
+  void _handleMessage(RemoteMessage message) {
+    final data = message.data;
+    if (data['type'] == 'missedDose') {
+      NotificationService().showCaregiverAlert(
+        medicationName: data['medicationName'] ?? 'medication',
+        patientName: data['patientName'] ?? 'Patient',
+        isArabic: data['language'] == 'ar',
+      );
+    } else if (data['type'] == 'caregiverAdded') {
+      final isAr = data['language'] == 'ar';
+      NotificationService().showCaregiverAlert(
+        medicationName: isAr ? 'تمت إضافتك كمراقب' : 'You were added as a caregiver',
+        patientName: data['patientName'] ?? 'Patient',
+        isArabic: isAr,
+      );
+    }
+  }
+
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
@@ -29,14 +47,16 @@ class FirebaseBackendService {
       _messaging = FirebaseMessaging.instance;
 
       await _messaging?.requestPermission(alert: true, badge: true, sound: true);
-      FirebaseMessaging.onMessage.listen((message) {
-        final data = message.data;
-        NotificationService().showCaregiverAlert(
-          medicationName: data['medicationName'] ?? 'medication',
-          patientName: data['patientName'] ?? 'Patient',
-          isArabic: data['language'] == 'ar',
-        );
-      });
+
+      // Foreground
+      FirebaseMessaging.onMessage.listen(_handleMessage);
+
+      // Background/Terminated
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
+      final initialMessage = await _messaging?.getInitialMessage();
+      if (initialMessage != null) {
+        _handleMessage(initialMessage);
+      }
 
       _enabled = true;
     } catch (e) {
@@ -58,6 +78,19 @@ class FirebaseBackendService {
       'phone': patient.phone,
       'arabicMode': patient.arabicMode,
       'caregiverAlertsEnabled': patient.caregiverAlertsEnabled,
+      'deviceToken': token,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    if (token != null) {
+      await registerUserDevice(patient.phone, token);
+    }
+  }
+
+  Future<void> registerUserDevice(String phone, String token) async {
+    if (!_enabled || _firestore == null) return;
+
+    await _firestore!.collection('userDevices').doc(phone).set({
       'deviceToken': token,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -131,5 +164,33 @@ class FirebaseBackendService {
     batch.set(patientAlertRef, payload);
     batch.set(caregiverInboxRef, payload);
     await batch.commit();
+  }
+
+  Future<void> sendCaregiverAddedAlert({
+    required String patientId,
+    required String patientName,
+    required String caregiverId,
+    required bool isArabic,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+
+    final notificationId = 'ADD-${DateTime.now().millisecondsSinceEpoch}';
+    final payload = {
+      'id': notificationId,
+      'patientId': patientId,
+      'patientName': patientName,
+      'caregiverId': caregiverId,
+      'type': 'caregiverAdded',
+      'language': isArabic ? 'ar' : 'en',
+      'sentAt': FieldValue.serverTimestamp(),
+      'delivered': false,
+    };
+
+    await _firestore!
+        .collection('caregiverInboxes')
+        .doc(caregiverId)
+        .collection('notifications')
+        .doc(notificationId)
+        .set(payload);
   }
 }
