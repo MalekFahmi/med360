@@ -133,11 +133,12 @@ class LocalDbService {
       CREATE TABLE caregiver_notifications (
         id TEXT PRIMARY KEY,
         patientId TEXT NOT NULL,
+        patientName TEXT NOT NULL,
         caregiverId TEXT NOT NULL,
         caregiverName TEXT NOT NULL,
-        medicationId TEXT NOT NULL,
-        medicationName TEXT NOT NULL,
-        missedAt TEXT NOT NULL,
+        medicationId TEXT,
+        medicationName TEXT,
+        missedAt TEXT,
         sentAt TEXT NOT NULL,
         channel TEXT NOT NULL,
         acknowledged INTEGER DEFAULT 0,
@@ -398,8 +399,9 @@ class LocalDbService {
   }
 
   Future<List<CaregiverNotification>> getCaregiverNotifications(
-      String patientId) async {
+      String userId) async {
     final d = await db;
+    // For local simplicity, we'll fetch all; ideally we filter by patientId OR caregiverId
     final rows = await d.query('caregiver_notifications',
         where: 'patientId = ?', whereArgs: [patientId], orderBy: 'sentAt DESC');
     return rows

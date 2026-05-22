@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
@@ -10,6 +12,7 @@ enum AccountRole { patient, caregiver }
 
 class AuthProvider extends ChangeNotifier {
   final LocalDbService _db;
+  final _fbAuth = fb_auth.FirebaseAuth.instance;
 
   AuthProvider(this._db);
 
@@ -60,6 +63,16 @@ class AuthProvider extends ChangeNotifier {
           return;
         }
       }
+      final savedCgUid = prefs.getString('loggedInCaregiverUid');
+      if (savedCgUid != null) {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(savedCgUid).get();
+        if (doc.exists) {
+          _caregiverUser = doc.data();
+          _status = AuthStatus.authenticated;
+          notifyListeners();
+          return;
+        }
+      }
     } catch (_) {}
     _status = AuthStatus.unauthenticated;
     notifyListeners();
@@ -78,20 +91,16 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Check phone not already registered
-      final existing = await _db.getPatientByPhone(phone);
-      if (existing != null) {
-        _errorMessage = 'This phone number is already registered.';
-        _status = AuthStatus.unauthenticated;
-        notifyListeners();
-        return false;
-      }
+      // We use email for Firebase Auth, let's create a dummy email from phone
+      final email = '$phone@med360.com';
+      final cred = await _fbAuth.createUserWithEmailAndPassword(email: email, password: password);
+      final uid = cred.user!.uid;
 
       final newPatient = PatientUser(
-        id: 'PAT-${DateTime.now().millisecondsSinceEpoch}',
+        id: uid,
         name: name,
         phone: phone,
-        passwordHash: _hashPassword(password), // simple hash for demo
+        passwordHash: _hashPassword(password),
         dateOfBirth: dateOfBirth,
         chronicCondition: chronicCondition,
         caregivers: [],
@@ -109,13 +118,13 @@ class AuthProvider extends ChangeNotifier {
       _role = AccountRole.patient;
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('loggedInPatientId', newPatient.id);
+      await prefs.setString('loggedInPatientId', uid);
 
       _status = AuthStatus.authenticated;
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Sign up failed. Please try again.';
+      _errorMessage = 'Sign up failed: $e';
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -129,9 +138,28 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final p = await _db.getPatientByPhone(phone);
-      if (p == null || p.passwordHash != _hashPassword(password)) {
-        _errorMessage = 'Incorrect phone number or password.';
+      final email = '$phone@med360.com';
+      final cred = await _fbAuth.signInWithEmailAndPassword(email: email, password: password);
+      final uid = cred.user!.uid;
+
+      var p = await _db.getPatientById(uid);
+      if (p == null) {
+        // Fallback for transition or if local db was cleared
+        final doc = await FirebaseFirestore.instance.collection('patients').doc(uid).get();
+        if (doc.exists) {
+          p = PatientUser.fromMap({
+            ...doc.data()!,
+            'id': uid,
+            'passwordHash': _hashPassword(password),
+            'createdAt': DateTime.now().toIso8601String(), // placeholder
+          });
+          await _db.insertPatient(p);
+        }
+      }
+
+      if (p == null) {
+        _errorMessage = 'Patient data not found.';
+        await _fbAuth.signOut();
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -146,13 +174,76 @@ class AuthProvider extends ChangeNotifier {
       );
       await FirebaseBackendService().registerPatientDevice(p);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('loggedInPatientId', p.id);
+      await prefs.setString('loggedInPatientId', uid);
 
       _status = AuthStatus.authenticated;
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Login failed. Please try again.';
+      _errorMessage = 'Login failed: $e';
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ── Caregiver Auth ────────────────────────────────────────────────────────
+  Future<bool> caregiverSignUp({
+    required String name,
+    required String email,
+    required String password,
+    required String phone,
+  }) async {
+    _status = AuthStatus.loading;
+    notifyListeners();
+    try {
+      final cred = await _fbAuth.createUserWithEmailAndPassword(email: email, password: password);
+      final uid = cred.user!.uid;
+      final userData = {
+        'uid': uid,
+        'role': 'caregiver',
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(userData);
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      _caregiverUser = doc.data();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('loggedInCaregiverUid', uid);
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> caregiverLogin({required String email, required String password}) async {
+    _status = AuthStatus.loading;
+    notifyListeners();
+    try {
+      final cred = await _fbAuth.signInWithEmailAndPassword(email: email, password: password);
+      final doc = await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).get();
+      if (!doc.exists || doc.data()!['role'] != 'caregiver') {
+        _errorMessage = 'User not found or not a caregiver.';
+        await _fbAuth.signOut();
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+        return false;
+      }
+      _caregiverUser = doc.data();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('loggedInCaregiverUid', cred.user!.uid);
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;

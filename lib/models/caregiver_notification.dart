@@ -4,6 +4,8 @@ class CaregiverNotification {
   final String id;
   final String caregiverId;
   final String caregiverName;
+  final String patientId;
+  final String patientName;
   final String? medicationId;
   final String? medicationName;
   final DateTime? missedAt;
@@ -16,6 +18,8 @@ class CaregiverNotification {
     required this.id,
     required this.caregiverId,
     required this.caregiverName,
+    required this.patientId,
+    required this.patientName,
     this.medicationId,
     this.medicationName,
     this.missedAt,
@@ -29,6 +33,8 @@ class CaregiverNotification {
         'id': id,
         'caregiverId': caregiverId,
         'caregiverName': caregiverName,
+        'patientId': patientId,
+        'patientName': patientName,
         'medicationId': medicationId,
         'medicationName': medicationName,
         'missedAt': missedAt?.toIso8601String(),
@@ -42,7 +48,9 @@ class CaregiverNotification {
       CaregiverNotification(
         id: m['id'],
         caregiverId: m['caregiverId'],
-        caregiverName: m['caregiverName'],
+        caregiverName: m['caregiverName'] ?? '',
+        patientId: m['patientId'] ?? '',
+        patientName: m['patientName'] ?? '',
         medicationId: m['medicationId'],
         medicationName: m['medicationName'],
         missedAt: m['missedAt'] != null ? DateTime.parse(m['missedAt']) : null,
@@ -56,6 +64,8 @@ class CaregiverNotification {
         id: id,
         caregiverId: caregiverId,
         caregiverName: caregiverName,
+        patientId: patientId,
+        patientName: patientName,
         medicationId: medicationId,
         medicationName: medicationName,
         missedAt: missedAt,

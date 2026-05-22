@@ -181,7 +181,7 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
   final _formKey = GlobalKey<FormState>();
   final _phoneCtrl = TextEditingController();
   final _relationCtrl = TextEditingController();
-  NotificationPermission _permission = NotificationPermission.missedDoseOnly;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -190,7 +190,7 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
     super.dispose();
   }
 
-  void _save() {
+  void _save() async {
     if (!_formKey.currentState!.validate()) return;
     Navigator.pop(
       context,
@@ -200,6 +200,15 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
         permission: _permission,
       ),
     );
+
+    if (mounted) {
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+        setState(() => _isSubmitting = false);
+      } else {
+        Navigator.pop(context);
+      }
+    }
   }
 
   @override

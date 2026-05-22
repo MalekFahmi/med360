@@ -86,7 +86,9 @@ class CaregiverProvider extends ChangeNotifier {
     return CaregiverNotification(
       id: data['id'] ?? '',
       caregiverId: data['caregiverId'] ?? '',
-      caregiverName: data['caregiverName'] ?? data['patientName'] ?? '',
+      caregiverName: data['caregiverName'] ?? '',
+      patientId: data['patientId'] ?? '',
+      patientName: data['patientName'] ?? '',
       medicationId: data['medicationId'],
       medicationName: data['medicationName'],
       missedAt:

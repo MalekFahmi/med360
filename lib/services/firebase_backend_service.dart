@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
 import 'notification_service.dart';
+import '../firebase_options.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -346,6 +347,25 @@ class FirebaseBackendService {
       'deviceToken': token,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  Future<void> updateCaregiverToken(String uid) async {
+    if (!_enabled || _firestore == null) return;
+
+    final token = await _messaging?.getToken();
+    if (token != null) {
+      await _firestore!.collection('users').doc(uid).set({
+        'fcmToken': token,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    _messaging?.onTokenRefresh.listen((newToken) {
+      _firestore!.collection('users').doc(uid).set({
+        'fcmToken': newToken,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
   }
 
   Future<void> upsertCaregiver({
