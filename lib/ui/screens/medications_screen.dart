@@ -351,7 +351,7 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<MedicationForm>(
-                initialValue: _form,
+                value: _form,
                 decoration: InputDecoration(labelText: isAr ? 'الشكل' : 'Form'),
                 items: MedicationForm.values
                     .map((form) => DropdownMenuItem(
@@ -412,7 +412,7 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<ReminderType>(
-                initialValue: _reminderType,
+                value: _reminderType,
                 decoration: InputDecoration(
                   labelText: isAr ? 'نوع التذكير' : 'Reminder type',
                 ),
