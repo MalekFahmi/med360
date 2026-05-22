@@ -9,8 +9,8 @@ class ReportProvider extends ChangeNotifier {
   final LoadStatus _status = LoadStatus.initial;
   List<MonthlyAdherenceSummary> _reports = [];
 
-  LoadStatus get status  => _status;
-  bool get isLoading     => _status == LoadStatus.loading;
+  LoadStatus get status => _status;
+  bool get isLoading => _status == LoadStatus.loading;
   List<MonthlyAdherenceSummary> get reports => _reports;
 
   // Build monthly summaries from the dose history already in memory
@@ -28,27 +28,32 @@ class ReportProvider extends ChangeNotifier {
         .toSet();
 
     for (final key in months) {
-      final parts  = key.split('-');
-      final year   = int.parse(parts[0]);
-      final month  = int.parse(parts[1]);
+      final parts = key.split('-');
+      final year = int.parse(parts[0]);
+      final month = int.parse(parts[1]);
 
-      final monthDoses = allDoses.where((d) =>
-          d.scheduledDate.year == year &&
-          d.scheduledDate.month == month).toList();
+      final monthDoses = allDoses
+          .where((d) =>
+              d.scheduledDate.year == year && d.scheduledDate.month == month)
+          .toList();
 
       final medIds = monthDoses.map((d) => d.medicationId).toSet();
       final records = medIds.map((id) {
         final medDoses = monthDoses.where((d) => d.medicationId == id).toList();
-        final medName  = medications.firstWhere(
-          (m) => m.id == id,
-          orElse: () => medications.first,
-        ).displayName;
+        final medName = medications
+            .firstWhere(
+              (m) => m.id == id,
+              orElse: () => medications.first,
+            )
+            .displayName;
         return AdherenceRecord(
-          medicationId: id, medicationName: medName,
-          year: year, month: month,
-          totalDoses:   medDoses.length,
-          takenDoses:   medDoses.where((d) => d.isTaken).length,
-          missedDoses:  medDoses.where((d) => d.isMissed).length,
+          medicationId: id,
+          medicationName: medName,
+          year: year,
+          month: month,
+          totalDoses: medDoses.length,
+          takenDoses: medDoses.where((d) => d.isTaken).length,
+          missedDoses: medDoses.where((d) => d.isMissed).length,
           pendingDoses: medDoses.where((d) => d.isPending).length,
         );
       }).toList();
@@ -70,14 +75,17 @@ class ReportProvider extends ChangeNotifier {
   MonthlyAdherenceSummary? get currentMonthReport {
     final now = DateTime.now();
     try {
-      return _reports.firstWhere(
-          (r) => r.year == now.year && r.month == now.month);
-    } catch (_) { return null; }
+      return _reports
+          .firstWhere((r) => r.year == now.year && r.month == now.month);
+    } catch (_) {
+      return null;
+    }
   }
 
   List<MonthlyAdherenceSummary> get pastReports {
     final now = DateTime.now();
-    return _reports.where((r) =>
-        !(r.year == now.year && r.month == now.month)).toList();
+    return _reports
+        .where((r) => !(r.year == now.year && r.month == now.month))
+        .toList();
   }
 }

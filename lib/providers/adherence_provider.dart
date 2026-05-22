@@ -7,6 +7,8 @@ import 'medication_provider.dart' show LoadStatus;
 export 'medication_provider.dart' show LoadStatus;
 
 class AdherenceProvider extends ChangeNotifier {
+  static const missedGracePeriod = Duration(minutes: 5);
+
   final LocalDbService _db;
   AdherenceProvider(this._db);
 
@@ -14,8 +16,8 @@ class AdherenceProvider extends ChangeNotifier {
   List<DoseConfirmation> _allDoses = [];
   String? _errorMessage;
 
-  LoadStatus get status   => _status;
-  bool get isLoading      => _status == LoadStatus.loading;
+  LoadStatus get status => _status;
+  bool get isLoading => _status == LoadStatus.loading;
   String? get errorMessage => _errorMessage;
   List<DoseConfirmation> get allDoses => _allDoses;
 
@@ -39,9 +41,9 @@ class AdherenceProvider extends ChangeNotifier {
       dosesForDate(date).any((d) => d.isMissed);
 
   double monthlyAdherenceRate(int year, int month) {
-    final doses = _allDoses.where((d) =>
-        d.scheduledDate.year == year && d.scheduledDate.month == month);
-    final taken  = doses.where((d) => d.isTaken).length;
+    final doses = _allDoses.where(
+        (d) => d.scheduledDate.year == year && d.scheduledDate.month == month);
+    final taken = doses.where((d) => d.isTaken).length;
     final missed = doses.where((d) => d.isMissed).length;
     final resolved = taken + missed;
     return resolved == 0 ? 0.0 : taken / resolved;
@@ -61,15 +63,17 @@ class AdherenceProvider extends ChangeNotifier {
           !d.scheduledDate.isBefore(start) &&
           d.scheduledDate.isBefore(end.add(const Duration(days: 1))) &&
           d.scheduledDate.month == month);
-      final taken  = weekDoses.where((d) => d.isTaken).length;
+      final taken = weekDoses.where((d) => d.isTaken).length;
       final missed = weekDoses.where((d) => d.isMissed).length;
       final resolved = taken + missed;
       weeks.add({
         'label': 'W$weekNum',
         'rate': resolved == 0 ? 0.0 : taken / resolved,
-        'taken': taken, 'missed': missed,
+        'taken': taken,
+        'missed': missed,
       });
-      weekNum++; day += 7;
+      weekNum++;
+      day += 7;
     }
     return weeks;
   }
@@ -122,12 +126,14 @@ class AdherenceProvider extends ChangeNotifier {
     required List<Caregiver> caregivers,
     required bool caregiverAlertsEnabled,
   }) async {
+    final alertableCaregivers = _alertableCaregivers(caregivers);
     _allDoses = _allDoses.map((d) {
       if (d.id != doseId) return d;
       return d.copyWith(
         status: DoseStatus.missed,
         confirmedAt: DateTime.now(),
-        caregiverNotified: caregiverAlertsEnabled && caregivers.isNotEmpty,
+        caregiverNotified:
+            caregiverAlertsEnabled && alertableCaregivers.isNotEmpty,
       );
     }).toList();
     notifyListeners();
@@ -135,11 +141,60 @@ class AdherenceProvider extends ChangeNotifier {
     await _db.updateDose(patientId, updated);
 
     if (!caregiverAlertsEnabled) return [];
-    return caregivers
-        .where((c) =>
-            c.permission == NotificationPermission.missedDoseOnly ||
-            c.permission == NotificationPermission.all)
-        .map((c) => c.id)
-        .toList();
+    return alertableCaregivers.map((c) => c.id).toList();
+  }
+
+  Future<List<DoseConfirmation>> markOverdueDosesMissed(
+    String patientId, {
+    required List<Caregiver> caregivers,
+    required bool caregiverAlertsEnabled,
+  }) async {
+    final now = DateTime.now();
+    final alertableCaregivers = _alertableCaregivers(caregivers);
+    final notifyCaregivers =
+        caregiverAlertsEnabled && alertableCaregivers.isNotEmpty;
+    final missedDoses = <DoseConfirmation>[];
+
+    _allDoses = _allDoses.map((dose) {
+      if (!dose.isPending || !_isOverdue(dose, now)) return dose;
+      final updated = dose.copyWith(
+        status: DoseStatus.missed,
+        confirmedAt: now,
+        caregiverNotified: notifyCaregivers,
+      );
+      missedDoses.add(updated);
+      return updated;
+    }).toList();
+
+    for (final dose in missedDoses) {
+      await _db.updateDose(patientId, dose);
+    }
+    if (missedDoses.isNotEmpty) notifyListeners();
+    return missedDoses;
+  }
+
+  List<String> caregiverIdsForMissedDoseAlerts(List<Caregiver> caregivers) =>
+      _alertableCaregivers(caregivers).map((c) => c.id).toList();
+
+  List<Caregiver> _alertableCaregivers(List<Caregiver> caregivers) => caregivers
+      .where((c) =>
+          c.permission == NotificationPermission.missedDoseOnly ||
+          c.permission == NotificationPermission.all)
+      .toList();
+
+  bool _isOverdue(DoseConfirmation dose, DateTime now) =>
+      now.isAfter(_scheduledDateTime(dose).add(missedGracePeriod));
+
+  DateTime _scheduledDateTime(DoseConfirmation dose) {
+    final parts = dose.scheduledTime.split(':');
+    final hour = int.tryParse(parts.first) ?? 0;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return DateTime(
+      dose.scheduledDate.year,
+      dose.scheduledDate.month,
+      dose.scheduledDate.day,
+      hour,
+      minute,
+    );
   }
 }

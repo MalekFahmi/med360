@@ -1,38 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../widgets/shared_widgets.dart';
-import '../theme/app_theme.dart';
+
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class CaregiverScreen extends StatelessWidget {
   const CaregiverScreen({super.key});
 
   Future<void> _addCaregiver(BuildContext context) async {
-    final caregiver = await showModalBottomSheet<Caregiver>(
+    final request = await showModalBottomSheet<_CaregiverLinkRequest>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => _CaregiverFormSheet(isArabic: context.read<AuthProvider>().arabicMode),
+      builder: (_) => const _CaregiverFormSheet(),
     );
-    if (caregiver == null || !context.mounted) return;
-    await context.read<AuthProvider>().addCaregiver(caregiver);
+    if (request == null || !context.mounted) return;
+
+    final ok = await context.read<AuthProvider>().addCaregiverByPhone(
+          phone: request.phone,
+          relationship: request.relationship,
+          permission: request.permission,
+        );
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Caregiver account linked'
+          : context.read<AuthProvider>().errorMessage ??
+              'No caregiver account was found for that phone number'),
+      backgroundColor: ok ? AppColors.teal : AppColors.red,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final isAr = auth.arabicMode;
     final caregivers = auth.caregivers;
 
     return Scaffold(
       backgroundColor: AppColors.grayLight,
       appBar: AppBar(
         backgroundColor: AppColors.grayLight,
-        title: Text(
-          isAr ? 'مقدمي الرعاية' : 'Caregivers',
-          style: AppTextStyles.screenTitle,
-        ),
+        title: const Text('Caregivers', style: AppTextStyles.screenTitle),
         elevation: 0,
         centerTitle: false,
       ),
@@ -43,10 +55,9 @@ class CaregiverScreen extends StatelessWidget {
           children: [
             AppCard(
               child: ToggleRow(
-                title: isAr ? 'تنبيهات مقدم الرعاية' : 'Caregiver Alerts',
-                subtitle: isAr
-                    ? 'إرسال تنبيه في حال تفويت جرعة'
-                    : 'Notify caregivers if a dose is missed',
+                title: 'Caregiver Alerts',
+                subtitle:
+                    'Notify linked caregiver accounts if a dose is missed',
                 value: auth.caregiverAlertsEnabled,
                 onChanged: (_) => auth.toggleCaregiverAlerts(),
               ),
@@ -55,27 +66,26 @@ class CaregiverScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                SectionLabel(isAr ? 'الأشخاص المصرح لهم' : 'Authorized Caregivers'),
+                const SectionLabel('Linked Caregiver Accounts'),
                 TextButton.icon(
                   onPressed: () => _addCaregiver(context),
                   icon: const Icon(Icons.add_rounded, size: 18),
-                  label: Text(isAr ? 'إضافة' : 'Add'),
+                  label: const Text('Link'),
                 ),
               ],
             ),
             if (caregivers.isEmpty)
-              EmptyState(
+              const EmptyState(
                 icon: Icons.people_outline_rounded,
-                title: isAr ? 'لا يوجد مقدمو رعاية' : 'No caregivers yet',
-                subtitle: isAr
-                    ? 'يمكنك إضافة شخص ليصله تنبيه عند تفويت جرعة'
-                    : 'Add someone who can be notified when a dose is missed',
+                title: 'No linked caregiver accounts',
+                subtitle:
+                    'Ask the caregiver to sign up first, then link them with their registered phone number',
               )
             else
               ...caregivers.map(
                 (caregiver) => Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: _CaregiverCard(caregiver: caregiver, isAr: isAr),
+                  child: _CaregiverCard(caregiver: caregiver),
                 ),
               ),
           ],
@@ -87,15 +97,14 @@ class CaregiverScreen extends StatelessWidget {
 
 class _CaregiverCard extends StatelessWidget {
   final Caregiver caregiver;
-  final bool isAr;
-  const _CaregiverCard({required this.caregiver, required this.isAr});
+  const _CaregiverCard({required this.caregiver});
 
   @override
   Widget build(BuildContext context) {
     final permissionLabel = switch (caregiver.permission) {
-      NotificationPermission.all => isAr ? 'تقارير وتنبيهات' : 'Full Access',
-      NotificationPermission.missedDoseOnly => isAr ? 'تنبيهات فقط' : 'Alerts Only',
-      NotificationPermission.none => isAr ? 'متوقف' : 'Muted',
+      NotificationPermission.all => 'Full Access',
+      NotificationPermission.missedDoseOnly => 'Alerts Only',
+      NotificationPermission.none => 'Muted',
     };
     final variant = switch (caregiver.permission) {
       NotificationPermission.all => BadgeVariant.blue,
@@ -118,7 +127,7 @@ class _CaregiverCard extends StatelessWidget {
               children: [
                 Text(caregiver.name, style: AppTextStyles.medName),
                 Text(
-                  '${caregiver.relationship} • ${caregiver.phone}',
+                  '${caregiver.relationship} - ${caregiver.email ?? caregiver.phone}',
                   style: AppTextStyles.medDetail,
                 ),
                 const SizedBox(height: 8),
@@ -148,23 +157,11 @@ class _CaregiverCard extends StatelessWidget {
                 await auth.removeCaregiver(caregiver.id);
               }
             },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'missed',
-                child: Text(isAr ? 'تنبيهات فقط' : 'Alerts only'),
-              ),
-              PopupMenuItem(
-                value: 'all',
-                child: Text(isAr ? 'تقارير وتنبيهات' : 'Full access'),
-              ),
-              PopupMenuItem(
-                value: 'none',
-                child: Text(isAr ? 'إيقاف التنبيهات' : 'Mute'),
-              ),
-              PopupMenuItem(
-                value: 'remove',
-                child: Text(isAr ? 'حذف' : 'Remove'),
-              ),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'missed', child: Text('Alerts only')),
+              PopupMenuItem(value: 'all', child: Text('Full access')),
+              PopupMenuItem(value: 'none', child: Text('Mute')),
+              PopupMenuItem(value: 'remove', child: Text('Remove')),
             ],
           ),
         ],
@@ -174,8 +171,7 @@ class _CaregiverCard extends StatelessWidget {
 }
 
 class _CaregiverFormSheet extends StatefulWidget {
-  final bool isArabic;
-  const _CaregiverFormSheet({required this.isArabic});
+  const _CaregiverFormSheet();
 
   @override
   State<_CaregiverFormSheet> createState() => _CaregiverFormSheetState();
@@ -183,14 +179,12 @@ class _CaregiverFormSheet extends StatefulWidget {
 
 class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _relationCtrl = TextEditingController();
   NotificationPermission _permission = NotificationPermission.missedDoseOnly;
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _relationCtrl.dispose();
     super.dispose();
@@ -198,13 +192,10 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
-    final phone = _phoneCtrl.text.trim().replaceAll(RegExp(r'\s+'), '');
     Navigator.pop(
       context,
-      Caregiver(
-        id: phone,
-        name: _nameCtrl.text.trim(),
-        phone: phone,
+      _CaregiverLinkRequest(
+        phone: _phoneCtrl.text.trim(),
         relationship: _relationCtrl.text.trim(),
         permission: _permission,
       ),
@@ -213,7 +204,6 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final isAr = widget.isArabic;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
@@ -225,53 +215,60 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                isAr ? 'إضافة مقدم رعاية' : 'Add caregiver',
+                'Link caregiver account',
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
-                controller: _nameCtrl,
-                decoration: InputDecoration(labelText: isAr ? 'الاسم الكامل' : 'Full name'),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل الاسم' : 'Enter a name')
-                        : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
-                decoration: InputDecoration(labelText: isAr ? 'رقم الهاتف' : 'Phone number'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل رقم الهاتف' : 'Enter a phone number')
-                        : null,
+                decoration: const InputDecoration(
+                  labelText: 'Caregiver registered phone number',
+                  prefixIcon: Icon(Icons.phone_outlined),
+                  border: OutlineInputBorder(borderRadius: AppRadius.md),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Enter the caregiver phone number';
+                  }
+                  if (value.trim().replaceAll(RegExp(r'[^0-9]'), '').length <
+                      7) {
+                    return 'Enter a valid phone number';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _relationCtrl,
-                decoration: InputDecoration(labelText: isAr ? 'صلة القرابة' : 'Relationship'),
+                decoration: const InputDecoration(
+                  labelText: 'Relationship',
+                  prefixIcon: Icon(Icons.people_outline_rounded),
+                  border: OutlineInputBorder(borderRadius: AppRadius.md),
+                ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? (isAr ? 'أدخل صلة القرابة' : 'Enter a relationship')
+                    ? 'Enter a relationship'
                     : null,
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<NotificationPermission>(
                 value: _permission,
-                decoration: InputDecoration(labelText: isAr ? 'الصلاحية' : 'Permission'),
-                items: [
+                decoration: const InputDecoration(
+                  labelText: 'Permission',
+                  border: OutlineInputBorder(borderRadius: AppRadius.md),
+                ),
+                items: const [
                   DropdownMenuItem(
                     value: NotificationPermission.missedDoseOnly,
-                    child: Text(isAr ? 'تنبيهات فقط' : 'Alerts only'),
+                    child: Text('Alerts only'),
                   ),
                   DropdownMenuItem(
                     value: NotificationPermission.all,
-                    child: Text(isAr ? 'تقارير وتنبيهات' : 'Full access'),
+                    child: Text('Full access'),
                   ),
                   DropdownMenuItem(
                     value: NotificationPermission.none,
-                    child: Text(isAr ? 'متوقف' : 'Muted'),
+                    child: Text('Muted'),
                   ),
                 ],
                 onChanged: (value) {
@@ -283,9 +280,10 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: _save,
-                  icon: const Icon(Icons.check_rounded),
-                  label: Text(isAr ? 'حفظ مقدم الرعاية' : 'Save caregiver'),
-                  style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text('Link caregiver account'),
+                  style:
+                      FilledButton.styleFrom(backgroundColor: AppColors.teal),
                 ),
               ),
             ],
@@ -294,4 +292,16 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
       ),
     );
   }
+}
+
+class _CaregiverLinkRequest {
+  final String phone;
+  final String relationship;
+  final NotificationPermission permission;
+
+  const _CaregiverLinkRequest({
+    required this.phone,
+    required this.relationship,
+    required this.permission,
+  });
 }

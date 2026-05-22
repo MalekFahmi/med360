@@ -29,27 +29,31 @@ class SettingsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children:[
+          children: [
             // FR1 — Profile Summary
             AppCard(
               child: Row(
-                children:[
+                children: [
                   const CircleAvatar(
                     radius: 30,
                     backgroundColor: AppColors.teal,
-                    child: Icon(Icons.person_rounded, color: AppColors.white, size: 32),
+                    child: Icon(Icons.person_rounded,
+                        color: AppColors.white, size: 32),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children:[
+                      children: [
                         Text(
                           patient?.name ?? 'Ahmed Hassan',
-                          style: AppTextStyles.screenTitle.copyWith(fontSize: 18),
+                          style:
+                              AppTextStyles.screenTitle.copyWith(fontSize: 18),
                         ),
                         Text(
-                          isAr ? 'رقم الهاتف: ${patient?.phone}' : 'Phone: ${patient?.phone}',
+                          isAr
+                              ? 'رقم الهاتف: ${patient?.phone}'
+                              : 'Phone: ${patient?.phone}',
                           style: AppTextStyles.medDetail,
                         ),
                       ],
@@ -61,11 +65,13 @@ class SettingsScreen extends StatelessWidget {
             const SizedBox(height: AppSpacing.xl),
 
             // NFR — Accessibility Settings
-            SectionLabel(isAr ? 'إمكانية الوصول' : 'Accessibility & Preferences'),
+            SectionLabel(
+                isAr ? 'إمكانية الوصول' : 'Accessibility & Preferences'),
             AppCard(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
               child: Column(
-                children:[
+                children: [
                   ToggleRow(
                     title: isAr ? 'اللغة العربية' : 'Arabic Language',
                     value: auth.arabicMode,
@@ -101,7 +107,8 @@ class SettingsScreen extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   side: const BorderSide(color: AppColors.redLight),
-                  shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
+                  shape:
+                      const RoundedRectangleBorder(borderRadius: AppRadius.md),
                 ),
               ),
             ),

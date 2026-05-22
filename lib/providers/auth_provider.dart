@@ -6,6 +6,8 @@ import '../services/local_db_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
+enum AccountRole { patient, caregiver }
+
 class AuthProvider extends ChangeNotifier {
   final LocalDbService _db;
 
@@ -13,31 +15,46 @@ class AuthProvider extends ChangeNotifier {
 
   AuthStatus _status = AuthStatus.initial;
   PatientUser? _patient;
+  CaregiverUser? _caregiver;
+  AccountRole? _role;
   String? _errorMessage;
 
-  AuthStatus get status    => _status;
+  AuthStatus get status => _status;
   PatientUser? get patient => _patient;
+  CaregiverUser? get caregiver => _caregiver;
+  AccountRole? get role => _role;
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _status == AuthStatus.authenticated;
-  bool get isLoading       => _status == AuthStatus.loading;
+  bool get isLoading => _status == AuthStatus.loading;
+  bool get isCaregiver => _role == AccountRole.caregiver;
 
-  bool get arabicMode             => _patient?.arabicMode ?? false;
-  bool get largeFonts             => _patient?.largeFonts ?? false;
-  bool get highContrast           => _patient?.highContrast ?? false;
+  bool get arabicMode => _patient?.arabicMode ?? false;
+  bool get largeFonts => _patient?.largeFonts ?? false;
+  bool get highContrast => _patient?.highContrast ?? false;
   bool get caregiverAlertsEnabled => _patient?.caregiverAlertsEnabled ?? true;
-  List<Caregiver> get caregivers  => _patient?.caregivers ?? [];
+  List<Caregiver> get caregivers => _patient?.caregivers ?? [];
 
   // ── Auto-login on app start ───────────────────────────────────────────────
   Future<void> tryAutoLogin() async {
     _status = AuthStatus.loading;
     notifyListeners();
     try {
+      final caregiver = await FirebaseBackendService().currentCaregiver();
+      if (caregiver != null) {
+        _caregiver = caregiver;
+        _role = AccountRole.caregiver;
+        _status = AuthStatus.authenticated;
+        notifyListeners();
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString('loggedInPatientId');
       if (savedId != null) {
         final p = await _db.getPatientById(savedId);
         if (p != null) {
           _patient = p;
+          _role = AccountRole.patient;
           _status = AuthStatus.authenticated;
           notifyListeners();
           return;
@@ -82,8 +99,14 @@ class AuthProvider extends ChangeNotifier {
       );
 
       await _db.insertPatient(newPatient);
+      await FirebaseBackendService().registerPatientAuth(
+        patient: newPatient,
+        password: password,
+      );
       await FirebaseBackendService().registerPatientDevice(newPatient);
       _patient = newPatient;
+      _caregiver = null;
+      _role = AccountRole.patient;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', newPatient.id);
@@ -115,6 +138,12 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _patient = p;
+      _caregiver = null;
+      _role = AccountRole.patient;
+      await FirebaseBackendService().loginPatientAuth(
+        patient: p,
+        password: password,
+      );
       await FirebaseBackendService().registerPatientDevice(p);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', p.id);
@@ -134,9 +163,72 @@ class AuthProvider extends ChangeNotifier {
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('loggedInPatientId');
+    await FirebaseBackendService().logoutFirebaseUser();
     _patient = null;
+    _caregiver = null;
+    _role = null;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
+  }
+
+  Future<bool> registerCaregiver({
+    required String name,
+    required String email,
+    required String password,
+    required String phone,
+  }) async {
+    _errorMessage = null;
+    _status = AuthStatus.loading;
+    notifyListeners();
+
+    try {
+      _caregiver = await FirebaseBackendService().registerCaregiver(
+        name: name,
+        email: email,
+        password: password,
+        phone: phone,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('loggedInPatientId');
+      _patient = null;
+      _role = AccountRole.caregiver;
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> loginCaregiver({
+    required String email,
+    required String password,
+  }) async {
+    _errorMessage = null;
+    _status = AuthStatus.loading;
+    notifyListeners();
+
+    try {
+      _caregiver = await FirebaseBackendService().loginCaregiver(
+        email: email,
+        password: password,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('loggedInPatientId');
+      _patient = null;
+      _role = AccountRole.caregiver;
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -146,15 +238,78 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggleArabicMode()        => _saveAndNotify(_patient!.copyWith(arabicMode: !arabicMode));
-  Future<void> toggleLargeFonts()        => _saveAndNotify(_patient!.copyWith(largeFonts: !largeFonts));
-  Future<void> toggleHighContrast()      => _saveAndNotify(_patient!.copyWith(highContrast: !highContrast));
-  Future<void> toggleCaregiverAlerts()   => _saveAndNotify(_patient!.copyWith(caregiverAlertsEnabled: !caregiverAlertsEnabled));
+  Future<void> toggleArabicMode() =>
+      _saveAndNotify(_patient!.copyWith(arabicMode: !arabicMode));
+  Future<void> toggleLargeFonts() =>
+      _saveAndNotify(_patient!.copyWith(largeFonts: !largeFonts));
+  Future<void> toggleHighContrast() =>
+      _saveAndNotify(_patient!.copyWith(highContrast: !highContrast));
+  Future<void> toggleCaregiverAlerts() => _saveAndNotify(
+      _patient!.copyWith(caregiverAlertsEnabled: !caregiverAlertsEnabled));
 
   Future<void> updateProfile({String? name, String? chronicCondition}) =>
-      _saveAndNotify(_patient!.copyWith(name: name, chronicCondition: chronicCondition));
+      _saveAndNotify(
+          _patient!.copyWith(name: name, chronicCondition: chronicCondition));
 
   // ── Caregiver management ──────────────────────────────────────────────────
+  Future<bool> addCaregiverByEmail({
+    required String email,
+    required String relationship,
+    NotificationPermission permission = NotificationPermission.missedDoseOnly,
+  }) async {
+    final registered =
+        await FirebaseBackendService().findCaregiverByEmail(email);
+    if (registered == null) {
+      _errorMessage = 'No registered caregiver was found for that email.';
+      notifyListeners();
+      return false;
+    }
+    final cg = Caregiver(
+      id: registered.id,
+      name: registered.name,
+      email: registered.email,
+      phone: registered.phone,
+      relationship: relationship,
+      permission: permission,
+    );
+    return _tryLinkCaregiver(cg);
+  }
+
+  Future<bool> addCaregiverByPhone({
+    required String phone,
+    required String relationship,
+    NotificationPermission permission = NotificationPermission.missedDoseOnly,
+  }) async {
+    final registered =
+        await FirebaseBackendService().findCaregiverByPhone(phone);
+    if (registered == null) {
+      _errorMessage =
+          'No registered caregiver account was found for that phone number.';
+      notifyListeners();
+      return false;
+    }
+    final cg = Caregiver(
+      id: registered.id,
+      name: registered.name,
+      email: registered.email,
+      phone: registered.phone,
+      relationship: relationship,
+      permission: permission,
+    );
+    return _tryLinkCaregiver(cg);
+  }
+
+  Future<bool> _tryLinkCaregiver(Caregiver caregiver) async {
+    try {
+      await addCaregiver(caregiver);
+      return true;
+    } catch (e) {
+      _errorMessage = 'Could not link caregiver. Please try again.';
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> addCaregiver(Caregiver cg) async {
     await _db.insertCaregiver(_patient!.id, cg);
     await FirebaseBackendService().upsertCaregiver(
@@ -167,8 +322,7 @@ class AuthProvider extends ChangeNotifier {
       caregiverId: cg.id,
       isArabic: arabicMode,
     );
-    final updated = _patient!.copyWith(
-        caregivers: [...caregivers, cg]);
+    final updated = _patient!.copyWith(caregivers: [...caregivers, cg]);
     _patient = updated;
     notifyListeners();
   }
@@ -187,10 +341,11 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> updateCaregiverPermission(
       String caregiverId, NotificationPermission perm) async {
-    final updated = caregivers.map((c) =>
-        c.id == caregiverId ? c.copyWith(permission: perm) : c).toList();
-    await _db.insertCaregiver(_patient!.id,
-        updated.firstWhere((c) => c.id == caregiverId));
+    final updated = caregivers
+        .map((c) => c.id == caregiverId ? c.copyWith(permission: perm) : c)
+        .toList();
+    await _db.insertCaregiver(
+        _patient!.id, updated.firstWhere((c) => c.id == caregiverId));
     await FirebaseBackendService().upsertCaregiver(
       patientId: _patient!.id,
       caregiver: updated.firstWhere((c) => c.id == caregiverId),

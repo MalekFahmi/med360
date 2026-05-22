@@ -53,7 +53,7 @@ class MonthlyAdherenceSummary {
     required this.perMedication,
   });
 
-  int get takenDoses  => perMedication.fold(0, (s, r) => s + r.takenDoses);
+  int get takenDoses => perMedication.fold(0, (s, r) => s + r.takenDoses);
   int get missedDoses => perMedication.fold(0, (s, r) => s + r.missedDoses);
 
   double get overallAdherenceRate {
@@ -72,14 +72,40 @@ class MonthlyAdherenceSummary {
   }
 
   String get monthLabel {
-    const months = ['','January','February','March','April','May','June',
-        'July','August','September','October','November','December'];
+    const months = [
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
+    ];
     return '${months[month]} $year';
   }
 
   String get monthLabelAr {
-    const m = ['','يناير','فبراير','مارس','أبريل','مايو','يونيو',
-        'يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const m = [
+      '',
+      'يناير',
+      'فبراير',
+      'مارس',
+      'أبريل',
+      'مايو',
+      'يونيو',
+      'يوليو',
+      'أغسطس',
+      'سبتمبر',
+      'أكتوبر',
+      'نوفمبر',
+      'ديسمبر'
+    ];
     return '${m[month]} $year';
   }
 }

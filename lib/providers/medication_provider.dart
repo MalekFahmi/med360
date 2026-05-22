@@ -12,19 +12,22 @@ class MedicationProvider extends ChangeNotifier {
   List<Medication> _medications = [];
   String? _errorMessage;
 
-  LoadStatus get status              => _status;
-  List<Medication> get medications   => _medications;
-  String? get errorMessage           => _errorMessage;
-  bool get isLoading                 => _status == LoadStatus.loading;
-  bool get hasError                  => _status == LoadStatus.error;
-  bool get isEmpty                   => _medications.isEmpty && _status == LoadStatus.loaded;
+  LoadStatus get status => _status;
+  List<Medication> get medications => _medications;
+  String? get errorMessage => _errorMessage;
+  bool get isLoading => _status == LoadStatus.loading;
+  bool get hasError => _status == LoadStatus.error;
+  bool get isEmpty => _medications.isEmpty && _status == LoadStatus.loaded;
 
   List<Medication> get activeMedications =>
       _medications.where((m) => m.status == MedicationStatus.active).toList();
 
   Medication? findById(String id) {
-    try { return _medications.firstWhere((m) => m.id == id); }
-    catch (_) { return null; }
+    try {
+      return _medications.firstWhere((m) => m.id == id);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> loadMedications(String patientId) async {

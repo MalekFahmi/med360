@@ -26,31 +26,32 @@ class DoseConfirmation {
       scheduledDate.month == date.month &&
       scheduledDate.day == date.day;
 
-  bool get isTaken  => status == DoseStatus.taken;
+  bool get isTaken => status == DoseStatus.taken;
   bool get isMissed => status == DoseStatus.missed;
   bool get isPending => status == DoseStatus.pending;
 
   Map<String, dynamic> toMap() => {
-    'id': id,
-    'medicationId': medicationId,
-    'medicationName': medicationName,
-    'scheduledTime': scheduledTime,
-    'scheduledDate': scheduledDate.toIso8601String(),
-    'confirmedAt': confirmedAt?.toIso8601String(),
-    'status': status.name,
-    'caregiverNotified': caregiverNotified,
-  };
+        'id': id,
+        'medicationId': medicationId,
+        'medicationName': medicationName,
+        'scheduledTime': scheduledTime,
+        'scheduledDate': scheduledDate.toIso8601String(),
+        'confirmedAt': confirmedAt?.toIso8601String(),
+        'status': status.name,
+        'caregiverNotified': caregiverNotified,
+      };
 
   factory DoseConfirmation.fromMap(Map<String, dynamic> m) => DoseConfirmation(
-    id: m['id'],
-    medicationId: m['medicationId'],
-    medicationName: m['medicationName'],
-    scheduledTime: m['scheduledTime'],
-    scheduledDate: DateTime.parse(m['scheduledDate']),
-    confirmedAt: m['confirmedAt'] != null ? DateTime.parse(m['confirmedAt']) : null,
-    status: DoseStatus.values.byName(m['status']),
-    caregiverNotified: m['caregiverNotified'] ?? false,
-  );
+        id: m['id'],
+        medicationId: m['medicationId'],
+        medicationName: m['medicationName'],
+        scheduledTime: m['scheduledTime'],
+        scheduledDate: DateTime.parse(m['scheduledDate']),
+        confirmedAt:
+            m['confirmedAt'] != null ? DateTime.parse(m['confirmedAt']) : null,
+        status: DoseStatus.values.byName(m['status']),
+        caregiverNotified: m['caregiverNotified'] ?? false,
+      );
 
   DoseConfirmation copyWith({
     DoseStatus? status,

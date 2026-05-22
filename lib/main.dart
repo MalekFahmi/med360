@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -16,6 +18,7 @@ import 'ui/screens/dashboard_screen.dart';
 import 'ui/screens/medications_screen.dart';
 import 'ui/screens/adherence_screen.dart';
 import 'ui/screens/caregiver_screen.dart';
+import 'ui/screens/caregiver_dashboard_screen.dart';
 import 'ui/screens/settings_screen.dart';
 
 void main() async {
@@ -45,11 +48,13 @@ class Med360App extends StatelessWidget {
           return MaterialApp(
             title: 'MED360',
             debugShowCheckedModeBanner: false,
-            theme: _buildTheme(auth),
-            locale: auth.arabicMode ? const Locale('ar', 'LY') : const Locale('en', 'US'),
+            locale: auth.arabicMode
+                ? const Locale('ar', 'LY')
+                : const Locale('en', 'US'),
             builder: (context, child) {
               return Directionality(
-                textDirection: auth.arabicMode ? TextDirection.rtl : TextDirection.ltr,
+                textDirection:
+                    auth.arabicMode ? TextDirection.rtl : TextDirection.ltr,
                 child: child!,
               );
             },
@@ -59,15 +64,6 @@ class Med360App extends StatelessWidget {
       ),
     );
   }
-
-  ThemeData _buildTheme(AuthProvider auth) {
-    final base = ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D9E75)),
-      fontFamily: auth.arabicMode ? 'Cairo' : null,
-    );
-    return auth.largeFonts ? base.copyWith(textTheme: base.textTheme.apply(fontSizeFactor: 1.2)) : base;
-  }
 }
 
 class _AppRouter extends StatelessWidget {
@@ -76,11 +72,37 @@ class _AppRouter extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     return switch (auth.status) {
-      AuthStatus.initial || AuthStatus.loading => const Scaffold(body: Center(child: CircularProgressIndicator())),
-      AuthStatus.authenticated => const MainShell(),
+      AuthStatus.initial ||
+      AuthStatus.loading =>
+        const Scaffold(body: Center(child: CircularProgressIndicator())),
+      AuthStatus.authenticated =>
+        auth.isCaregiver ? const CaregiverShell() : const MainShell(),
       _ => const AuthScreen(),
     };
   }
+}
+
+class CaregiverShell extends StatefulWidget {
+  const CaregiverShell({super.key});
+
+  @override
+  State<CaregiverShell> createState() => _CaregiverShellState();
+}
+
+class _CaregiverShellState extends State<CaregiverShell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final caregiver = context.read<AuthProvider>().caregiver;
+      if (caregiver != null) {
+        context.read<CaregiverProvider>().listenToCaregiverData(caregiver.uid);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const CaregiverDashboardScreen();
 }
 
 class AuthScreen extends StatefulWidget {
@@ -91,10 +113,22 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool _showLogin = true;
+  bool _caregiverMode = false;
   void _toggle() => setState(() => _showLogin = !_showLogin);
+  void _setCaregiverMode(bool value) => setState(() => _caregiverMode = value);
   @override
   Widget build(BuildContext context) {
-    return _showLogin ? LoginScreen(onSignupTap: _toggle) : SignupScreen(onLoginTap: _toggle);
+    return _showLogin
+        ? LoginScreen(
+            onSignupTap: _toggle,
+            caregiverMode: _caregiverMode,
+            onCaregiverModeChanged: _setCaregiverMode,
+          )
+        : SignupScreen(
+            onLoginTap: _toggle,
+            caregiverMode: _caregiverMode,
+            onCaregiverModeChanged: _setCaregiverMode,
+          );
   }
 }
 
@@ -106,7 +140,14 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-  final List<Widget> _screens = const [DashboardScreen(), MedicationsScreen(), AdherenceScreen(), CaregiverScreen(), SettingsScreen()];
+  Timer? _autoMissedTimer;
+  final List<Widget> _screens = const [
+    DashboardScreen(),
+    MedicationsScreen(),
+    AdherenceScreen(),
+    CaregiverScreen(),
+    SettingsScreen()
+  ];
 
   @override
   void initState() {
@@ -130,7 +171,10 @@ class _MainShellState extends State<MainShell> {
       await NotificationService().requestPermissions();
       await medicationProvider.loadMedications(pId);
       final meds = medicationProvider.medications;
-      await adherenceProvider.loadAndGenerate(patientId: pId, medications: meds);
+      await adherenceProvider.loadAndGenerate(
+          patientId: pId, medications: meds);
+      await _markOverdueDosesAndNotify();
+      _startAutoMissedTimer();
       if (!mounted) return;
       reportProvider.buildReports(
         allDoses: adherenceProvider.allDoses,
@@ -139,14 +183,70 @@ class _MainShellState extends State<MainShell> {
     }
   }
 
+  void _startAutoMissedTimer() {
+    _autoMissedTimer?.cancel();
+    _autoMissedTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _markOverdueDosesAndNotify(),
+    );
+  }
+
+  Future<void> _markOverdueDosesAndNotify() async {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    final patient = auth.patient;
+    if (patient == null) return;
+
+    final adherenceProvider = context.read<AdherenceProvider>();
+    final caregiverProvider = context.read<CaregiverProvider>();
+    final reportProvider = context.read<ReportProvider>();
+    final medicationProvider = context.read<MedicationProvider>();
+
+    final missedDoses = await adherenceProvider.markOverdueDosesMissed(
+      patient.id,
+      caregivers: auth.caregivers,
+      caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+    );
+    if (missedDoses.isEmpty) return;
+
+    reportProvider.buildReports(
+      allDoses: adherenceProvider.allDoses,
+      medications: medicationProvider.medications,
+    );
+
+    if (!auth.caregiverAlertsEnabled) return;
+    final caregiverIds =
+        adherenceProvider.caregiverIdsForMissedDoseAlerts(auth.caregivers);
+    if (caregiverIds.isEmpty) return;
+
+    for (final dose in missedDoses) {
+      await caregiverProvider.dispatchMissedDoseAlert(
+        patientId: patient.id,
+        caregiverIds: caregiverIds,
+        allCaregivers: auth.caregivers,
+        medicationId: dose.medicationId,
+        medicationName: dose.medicationName,
+        missedAt: DateTime.now(),
+        patientName: patient.name,
+        isArabic: auth.arabicMode,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoMissedTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAr = context.watch<AuthProvider>().arabicMode;
     if (_currentIndex == 2) {
-       context.read<ReportProvider>().buildReports(
-         allDoses: context.read<AdherenceProvider>().allDoses,
-         medications: context.read<MedicationProvider>().medications,
-       );
+      context.read<ReportProvider>().buildReports(
+            allDoses: context.read<AdherenceProvider>().allDoses,
+            medications: context.read<MedicationProvider>().medications,
+          );
     }
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _screens),
@@ -154,11 +254,19 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),
         destinations: [
-          NavigationDestination(icon: const Icon(Icons.home), label: isAr ? 'الرئيسية' : 'Home'),
-          NavigationDestination(icon: const Icon(Icons.medication), label: isAr ? 'أدويتي' : 'Meds'),
-          NavigationDestination(icon: const Icon(Icons.bar_chart), label: isAr ? 'التقارير' : 'Reports'),
-          NavigationDestination(icon: const Icon(Icons.people), label: isAr ? 'الرعاية' : 'Care'),
-          NavigationDestination(icon: const Icon(Icons.settings), label: isAr ? 'إعدادات' : 'Settings'),
+          NavigationDestination(
+              icon: const Icon(Icons.home), label: isAr ? 'الرئيسية' : 'Home'),
+          NavigationDestination(
+              icon: const Icon(Icons.medication),
+              label: isAr ? 'أدويتي' : 'Meds'),
+          NavigationDestination(
+              icon: const Icon(Icons.bar_chart),
+              label: isAr ? 'التقارير' : 'Reports'),
+          NavigationDestination(
+              icon: const Icon(Icons.people), label: isAr ? 'الرعاية' : 'Care'),
+          NavigationDestination(
+              icon: const Icon(Icons.settings),
+              label: isAr ? 'إعدادات' : 'Settings'),
         ],
       ),
     );
