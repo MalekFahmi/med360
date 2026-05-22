@@ -257,7 +257,7 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<NotificationPermission>(
-                value: _permission,
+                initialValue: _permission,
                 decoration: InputDecoration(labelText: isAr ? 'الصلاحية' : 'Permission'),
                 items: [
                   DropdownMenuItem(
