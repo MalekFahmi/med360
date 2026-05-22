@@ -304,7 +304,7 @@ class LocalDbService {
       'id': n.id, 'patientId': patientId, 'caregiverId': n.caregiverId,
       'caregiverName': n.caregiverName, 'medicationId': n.medicationId,
       'medicationName': n.medicationName,
-      'missedAt': n.missedAt.toIso8601String(),
+      'missedAt': n.missedAt?.toIso8601String(),
       'sentAt': n.sentAt.toIso8601String(), 'channel': n.channel.name,
       'acknowledged': n.acknowledged ? 1 : 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -319,9 +319,9 @@ class LocalDbService {
     return rows.map((r) => CaregiverNotification(
       id: r['id'] as String, caregiverId: r['caregiverId'] as String,
       caregiverName: r['caregiverName'] as String,
-      medicationId: r['medicationId'] as String,
-      medicationName: r['medicationName'] as String,
-      missedAt: DateTime.parse(r['missedAt'] as String),
+      medicationId: r['medicationId'] as String?,
+      medicationName: r['medicationName'] as String?,
+      missedAt: r['missedAt'] != null ? DateTime.parse(r['missedAt'] as String) : null,
       sentAt: DateTime.parse(r['sentAt'] as String),
       channel: NotificationChannel.values.byName(r['channel'] as String),
       acknowledged: r['acknowledged'] == 1,

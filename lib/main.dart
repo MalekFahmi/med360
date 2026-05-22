@@ -120,10 +120,14 @@ class _MainShellState extends State<MainShell> {
     final auth = context.read<AuthProvider>();
     if (auth.patient != null) {
       final pId = auth.patient!.id;
+      final phone = auth.patient!.phone;
       final medicationProvider = context.read<MedicationProvider>();
       final adherenceProvider = context.read<AdherenceProvider>();
       final reportProvider = context.read<ReportProvider>();
+      final caregiverProvider = context.read<CaregiverProvider>();
+
       await FirebaseBackendService().registerPatientDevice(auth.patient!);
+      caregiverProvider.listenToInboundAlerts(phone);
       await NotificationService().requestPermissions();
       await medicationProvider.loadMedications(pId);
       final meds = medicationProvider.medications;

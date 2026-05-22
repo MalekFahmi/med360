@@ -198,12 +198,13 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
+    final phone = _phoneCtrl.text.trim().replaceAll(RegExp(r'\s+'), '');
     Navigator.pop(
       context,
       Caregiver(
-        id: 'CG-${DateTime.now().millisecondsSinceEpoch}',
+        id: phone,
         name: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim(),
+        phone: phone,
         relationship: _relationCtrl.text.trim(),
         permission: _permission,
       ),
