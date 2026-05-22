@@ -162,7 +162,7 @@ class ToggleRow extends StatelessWidget {
         Text(title, style: const TextStyle(fontSize: 14)),
         if (subtitle != null) Text(subtitle!, style: AppTextStyles.medDetail),
       ])),
-      Switch(value: value, onChanged: onChanged, activeColor: AppColors.teal),
+      Switch(value: value, onChanged: onChanged, activeThumbColor: AppColors.teal),
     ]),
   );
 }
