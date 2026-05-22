@@ -25,16 +25,38 @@ class LocalDbService {
       databaseFactory = databaseFactoryFfiWeb;
       return openDatabase(
         'med360.db',
-        version: 1,
+        version: 2,
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+        onOpen: _ensureCaregiverEmailColumn,
       );
     }
     final path = join(await getDatabasesPath(), 'med360.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+      onOpen: _ensureCaregiverEmailColumn,
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _ensureCaregiverEmailColumn(db);
+    }
+  }
+
+  Future<void> _ensureCaregiverEmailColumn(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'caregivers'",
+    );
+    if (tables.isEmpty) return;
+    final columns = await db.rawQuery('PRAGMA table_info(caregivers)');
+    final hasEmail = columns.any((column) => column['name'] == 'email');
+    if (!hasEmail) {
+      await db.execute('ALTER TABLE caregivers ADD COLUMN email TEXT');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -61,6 +83,7 @@ class LocalDbService {
         id TEXT PRIMARY KEY,
         patientId TEXT NOT NULL,
         name TEXT NOT NULL,
+        email TEXT,
         phone TEXT NOT NULL,
         relationship TEXT NOT NULL,
         permission TEXT NOT NULL,
@@ -128,17 +151,22 @@ class LocalDbService {
 
   Future<void> insertPatient(PatientUser patient) async {
     final d = await db;
-    await d.insert('patients', {
-      'id': patient.id, 'name': patient.name, 'phone': patient.phone,
-      'passwordHash': patient.passwordHash,
-      'dateOfBirth': patient.dateOfBirth?.toIso8601String(),
-      'chronicCondition': patient.chronicCondition,
-      'arabicMode': patient.arabicMode ? 1 : 0,
-      'largeFonts': patient.largeFonts ? 1 : 0,
-      'highContrast': patient.highContrast ? 1 : 0,
-      'caregiverAlertsEnabled': patient.caregiverAlertsEnabled ? 1 : 0,
-      'createdAt': patient.createdAt.toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await d.insert(
+        'patients',
+        {
+          'id': patient.id,
+          'name': patient.name,
+          'phone': patient.phone,
+          'passwordHash': patient.passwordHash,
+          'dateOfBirth': patient.dateOfBirth?.toIso8601String(),
+          'chronicCondition': patient.chronicCondition,
+          'arabicMode': patient.arabicMode ? 1 : 0,
+          'largeFonts': patient.largeFonts ? 1 : 0,
+          'highContrast': patient.highContrast ? 1 : 0,
+          'caregiverAlertsEnabled': patient.caregiverAlertsEnabled ? 1 : 0,
+          'createdAt': patient.createdAt.toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
 
     // Insert caregivers
     for (final cg in patient.caregivers) {
@@ -148,10 +176,11 @@ class LocalDbService {
 
   Future<PatientUser?> getPatientByPhone(String phone) async {
     final d = await db;
-    final rows = await d.query('patients',
-        where: 'phone = ?', whereArgs: [phone]);
+    final rows =
+        await d.query('patients', where: 'phone = ?', whereArgs: [phone]);
     if (rows.isEmpty) return null;
-    return _rowToPatient(rows.first, await _getCaregivers(rows.first['id'] as String, d));
+    return _rowToPatient(
+        rows.first, await _getCaregivers(rows.first['id'] as String, d));
   }
 
   Future<PatientUser?> getPatientById(String id) async {
@@ -163,21 +192,31 @@ class LocalDbService {
 
   Future<void> updatePatient(PatientUser patient) async {
     final d = await db;
-    await d.update('patients', {
-      'name': patient.name, 'phone': patient.phone,
-      'arabicMode': patient.arabicMode ? 1 : 0,
-      'largeFonts': patient.largeFonts ? 1 : 0,
-      'highContrast': patient.highContrast ? 1 : 0,
-      'caregiverAlertsEnabled': patient.caregiverAlertsEnabled ? 1 : 0,
-      'chronicCondition': patient.chronicCondition,
-    }, where: 'id = ?', whereArgs: [patient.id]);
+    await d.update(
+        'patients',
+        {
+          'name': patient.name,
+          'phone': patient.phone,
+          'arabicMode': patient.arabicMode ? 1 : 0,
+          'largeFonts': patient.largeFonts ? 1 : 0,
+          'highContrast': patient.highContrast ? 1 : 0,
+          'caregiverAlertsEnabled': patient.caregiverAlertsEnabled ? 1 : 0,
+          'chronicCondition': patient.chronicCondition,
+        },
+        where: 'id = ?',
+        whereArgs: [patient.id]);
   }
 
-  PatientUser _rowToPatient(Map<String, dynamic> row, List<Caregiver> caregivers) =>
+  PatientUser _rowToPatient(
+          Map<String, dynamic> row, List<Caregiver> caregivers) =>
       PatientUser(
-        id: row['id'], name: row['name'], phone: row['phone'],
+        id: row['id'],
+        name: row['name'],
+        phone: row['phone'],
         passwordHash: row['passwordHash'],
-        dateOfBirth: row['dateOfBirth'] != null ? DateTime.parse(row['dateOfBirth']) : null,
+        dateOfBirth: row['dateOfBirth'] != null
+            ? DateTime.parse(row['dateOfBirth'])
+            : null,
         chronicCondition: row['chronicCondition'],
         caregivers: caregivers,
         arabicMode: row['arabicMode'] == 1,
@@ -191,11 +230,18 @@ class LocalDbService {
 
   Future<void> insertCaregiver(String patientId, Caregiver cg) async {
     final d = await db;
-    await d.insert('caregivers', {
-      'id': cg.id, 'patientId': patientId, 'name': cg.name,
-      'phone': cg.phone, 'relationship': cg.relationship,
-      'permission': cg.permission.name,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await d.insert(
+        'caregivers',
+        {
+          'id': cg.id,
+          'patientId': patientId,
+          'name': cg.name,
+          'email': cg.email,
+          'phone': cg.phone,
+          'relationship': cg.relationship,
+          'permission': cg.permission.name,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> deleteCaregiver(String caregiverId) async {
@@ -204,30 +250,46 @@ class LocalDbService {
   }
 
   Future<List<Caregiver>> _getCaregivers(String patientId, Database d) async {
-    final rows = await d.query('caregivers',
-        where: 'patientId = ?', whereArgs: [patientId]);
-    return rows.map((r) => Caregiver(
-      id: r['id'] as String, name: r['name'] as String,
-      phone: r['phone'] as String, relationship: r['relationship'] as String,
-      permission: NotificationPermission.values.byName(r['permission'] as String),
-    )).toList();
+    final rows = await d
+        .query('caregivers', where: 'patientId = ?', whereArgs: [patientId]);
+    return rows
+        .map((r) => Caregiver(
+              id: r['id'] as String,
+              name: r['name'] as String,
+              email: r['email'] as String?,
+              phone: r['phone'] as String,
+              relationship: r['relationship'] as String,
+              permission: NotificationPermission.values
+                  .byName(r['permission'] as String),
+            ))
+        .toList();
   }
 
   // ─── Medications ──────────────────────────────────────────────────────────
 
   Future<void> insertMedication(String patientId, Medication med) async {
     final d = await db;
-    final timesJson = med.reminderTimes
-        .map((t) => '${t.hour}:${t.minute}').join(',');
-    await d.insert('medications', {
-      'id': med.id, 'patientId': patientId, 'name': med.name,
-      'nameAr': med.nameAr, 'dosage': med.dosage, 'form': med.form.name,
-      'indication': med.indication, 'indicationAr': med.indicationAr,
-      'reminderTimesJson': timesJson,
-      'reminderType': med.reminderType.name, 'status': med.status.name,
-      'startDate': med.startDate.toIso8601String(),
-      'notes': med.notes, 'notesAr': med.notesAr,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final timesJson =
+        med.reminderTimes.map((t) => '${t.hour}:${t.minute}').join(',');
+    await d.insert(
+        'medications',
+        {
+          'id': med.id,
+          'patientId': patientId,
+          'name': med.name,
+          'nameAr': med.nameAr,
+          'dosage': med.dosage,
+          'form': med.form.name,
+          'indication': med.indication,
+          'indicationAr': med.indicationAr,
+          'reminderTimesJson': timesJson,
+          'reminderType': med.reminderType.name,
+          'status': med.status.name,
+          'startDate': med.startDate.toIso8601String(),
+          'notes': med.notes,
+          'notesAr': med.notesAr,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> updateMedication(String patientId, Medication med) async =>
@@ -240,8 +302,8 @@ class LocalDbService {
 
   Future<List<Medication>> getMedications(String patientId) async {
     final d = await db;
-    final rows = await d.query('medications',
-        where: 'patientId = ?', whereArgs: [patientId]);
+    final rows = await d
+        .query('medications', where: 'patientId = ?', whereArgs: [patientId]);
     return rows.map(_rowToMedication).toList();
   }
 
@@ -249,17 +311,23 @@ class LocalDbService {
     final timesRaw = (r['reminderTimesJson'] as String).split(',');
     final times = timesRaw.map((t) {
       final parts = t.split(':');
-      return ReminderTime(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+      return ReminderTime(
+          hour: int.parse(parts[0]), minute: int.parse(parts[1]));
     }).toList();
     return Medication(
-      id: r['id'], name: r['name'], nameAr: r['nameAr'] ?? r['name'],
-      dosage: r['dosage'], form: MedicationForm.values.byName(r['form']),
-      indication: r['indication'] ?? '', indicationAr: r['indicationAr'] ?? '',
+      id: r['id'],
+      name: r['name'],
+      nameAr: r['nameAr'] ?? r['name'],
+      dosage: r['dosage'],
+      form: MedicationForm.values.byName(r['form']),
+      indication: r['indication'] ?? '',
+      indicationAr: r['indicationAr'] ?? '',
       reminderTimes: times,
       reminderType: ReminderType.values.byName(r['reminderType']),
       status: MedicationStatus.values.byName(r['status']),
       startDate: DateTime.parse(r['startDate']),
-      notes: r['notes'], notesAr: r['notesAr'],
+      notes: r['notes'],
+      notesAr: r['notesAr'],
     );
   }
 
@@ -267,14 +335,20 @@ class LocalDbService {
 
   Future<void> insertDose(String patientId, DoseConfirmation dose) async {
     final d = await db;
-    await d.insert('dose_confirmations', {
-      'id': dose.id, 'patientId': patientId,
-      'medicationId': dose.medicationId, 'medicationName': dose.medicationName,
-      'scheduledTime': dose.scheduledTime,
-      'scheduledDate': dose.scheduledDate.toIso8601String(),
-      'confirmedAt': dose.confirmedAt?.toIso8601String(),
-      'status': dose.status.name, 'caregiverNotified': dose.caregiverNotified ? 1 : 0,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await d.insert(
+        'dose_confirmations',
+        {
+          'id': dose.id,
+          'patientId': patientId,
+          'medicationId': dose.medicationId,
+          'medicationName': dose.medicationName,
+          'scheduledTime': dose.scheduledTime,
+          'scheduledDate': dose.scheduledDate.toIso8601String(),
+          'confirmedAt': dose.confirmedAt?.toIso8601String(),
+          'status': dose.status.name,
+          'caregiverNotified': dose.caregiverNotified ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> updateDose(String patientId, DoseConfirmation dose) async =>
@@ -283,17 +357,23 @@ class LocalDbService {
   Future<List<DoseConfirmation>> getDoseHistory(String patientId) async {
     final d = await db;
     final rows = await d.query('dose_confirmations',
-        where: 'patientId = ?', whereArgs: [patientId],
+        where: 'patientId = ?',
+        whereArgs: [patientId],
         orderBy: 'scheduledDate ASC');
-    return rows.map((r) => DoseConfirmation(
-      id: r['id'] as String, medicationId: r['medicationId'] as String,
-      medicationName: r['medicationName'] as String,
-      scheduledTime: r['scheduledTime'] as String,
-      scheduledDate: DateTime.parse(r['scheduledDate'] as String),
-      confirmedAt: r['confirmedAt'] != null ? DateTime.parse(r['confirmedAt'] as String) : null,
-      status: DoseStatus.values.byName(r['status'] as String),
-      caregiverNotified: r['caregiverNotified'] == 1,
-    )).toList();
+    return rows
+        .map((r) => DoseConfirmation(
+              id: r['id'] as String,
+              medicationId: r['medicationId'] as String,
+              medicationName: r['medicationName'] as String,
+              scheduledTime: r['scheduledTime'] as String,
+              scheduledDate: DateTime.parse(r['scheduledDate'] as String),
+              confirmedAt: r['confirmedAt'] != null
+                  ? DateTime.parse(r['confirmedAt'] as String)
+                  : null,
+              status: DoseStatus.values.byName(r['status'] as String),
+              caregiverNotified: r['caregiverNotified'] == 1,
+            ))
+        .toList();
   }
 
   // ─── Caregiver notifications ──────────────────────────────────────────────
@@ -301,19 +381,21 @@ class LocalDbService {
   Future<void> insertCaregiverNotification(
       String patientId, CaregiverNotification n) async {
     final d = await db;
-    await d.insert('caregiver_notifications', {
-      'id': n.id,
-      'patientId': n.patientId,
-      'patientName': n.patientName,
-      'caregiverId': n.caregiverId,
-      'caregiverName': n.caregiverName,
-      'medicationId': n.medicationId,
-      'medicationName': n.medicationName,
-      'missedAt': n.missedAt?.toIso8601String(),
-      'sentAt': n.sentAt.toIso8601String(),
-      'channel': n.channel.name,
-      'acknowledged': n.acknowledged ? 1 : 0,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await d.insert(
+        'caregiver_notifications',
+        {
+          'id': n.id,
+          'patientId': patientId,
+          'caregiverId': n.caregiverId,
+          'caregiverName': n.caregiverName,
+          'medicationId': n.medicationId,
+          'medicationName': n.medicationName,
+          'missedAt': n.missedAt?.toIso8601String(),
+          'sentAt': n.sentAt.toIso8601String(),
+          'channel': n.channel.name,
+          'acknowledged': n.acknowledged ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<CaregiverNotification>> getCaregiverNotifications(
@@ -321,23 +403,20 @@ class LocalDbService {
     final d = await db;
     // For local simplicity, we'll fetch all; ideally we filter by patientId OR caregiverId
     final rows = await d.query('caregiver_notifications',
-        where: 'patientId = ? OR caregiverId = ?',
-        whereArgs: [userId, userId],
-        orderBy: 'sentAt DESC');
+        where: 'patientId = ?', whereArgs: [patientId], orderBy: 'sentAt DESC');
     return rows
         .map((r) => CaregiverNotification(
               id: r['id'] as String,
               caregiverId: r['caregiverId'] as String,
               caregiverName: r['caregiverName'] as String,
-              patientId: r['patientId'] as String,
-              patientName: r['patientName'] as String,
               medicationId: r['medicationId'] as String?,
               medicationName: r['medicationName'] as String?,
               missedAt: r['missedAt'] != null
                   ? DateTime.parse(r['missedAt'] as String)
                   : null,
               sentAt: DateTime.parse(r['sentAt'] as String),
-              channel: NotificationChannel.values.byName(r['channel'] as String),
+              channel:
+                  NotificationChannel.values.byName(r['channel'] as String),
               acknowledged: r['acknowledged'] == 1,
             ))
         .toList();

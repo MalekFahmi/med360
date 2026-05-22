@@ -15,7 +15,9 @@ class DoseGenerator {
 
     for (final med in medications) {
       if (med.status != MedicationStatus.active) continue;
-      if (date.isBefore(med.startDate.subtract(const Duration(days: 1)))) continue;
+      if (date.isBefore(med.startDate.subtract(const Duration(days: 1)))) {
+        continue;
+      }
 
       for (final time in med.reminderTimes) {
         final timeStr = time.display;
@@ -41,5 +43,5 @@ class DoseGenerator {
   }
 
   static String _dateKey(DateTime d) =>
-      '${d.year}${d.month.toString().padLeft(2,'0')}${d.day.toString().padLeft(2,'0')}';
+      '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
 }

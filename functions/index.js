@@ -1,72 +1,76 @@
-/**
- * Cloud Function to send FCM push notifications to caregivers.
- */
-
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const logger = require("firebase-functions/logger");
+
 admin.initializeApp();
 
-exports.sendCaregiverNotification = functions.firestore
-    .document("caregiverInboxes/{caregiverUid}/notifications/{notificationId}")
-    .onCreate(async (snapshot, context) => {
-      const data = snapshot.data();
-      const caregiverUid = context.params.caregiverUid;
+exports.sendCaregiverNotification = onDocumentCreated(
+  "caregiverInboxes/{caregiverUid}/notifications/{notificationId}",
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
 
-      // 1. Get caregiver's FCM token
-      const userDoc = await admin.firestore()
-          .collection("users")
-          .doc(caregiverUid)
-          .get();
+    const {caregiverUid, notificationId} = event.params;
+    const notification = snapshot.data();
+    const caregiverDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(caregiverUid)
+      .get();
 
-      if (!userDoc.exists) {
-        console.log("Caregiver user not found:", caregiverUid);
-        return null;
-      }
+    const token = caregiverDoc.get("fcmToken");
+    if (!token) {
+      logger.warn("Caregiver has no FCM token", {caregiverUid, notificationId});
+      await snapshot.ref.set(
+        {
+          delivered: false,
+          deliveryError: "missing-fcm-token",
+          deliveryAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+      return;
+    }
 
-      const fcmToken = userDoc.data().fcmToken;
-      if (!fcmToken) {
-        console.log("FCM token not found for caregiver:", caregiverUid);
-        return null;
-      }
+    const title = notification.title || "Missed Medication Alert";
+    const body =
+      notification.body ||
+      `${notification.patientName || "Patient"} missed a scheduled medication.`;
 
-      // 2. Prepare notification content
-      let title = "MED360 Alert";
-      let body = "You have a new notification.";
-
-      if (data.type === "missedDose") {
-        const isAr = data.language === "ar";
-        title = isAr ? "تنبيه جرعة فائتة" : "Missed Medication Alert";
-        body = isAr ?
-            `فاتت جرعة ${data.medicationName} للمريض ${data.patientName}` :
-            `${data.patientName} missed a scheduled medication: ${data.medicationName}`;
-      } else if (data.type === "caregiverAdded") {
-        const isAr = data.language === "ar";
-        title = isAr ? "تمت إضافتك كمراقب" : "New Patient Linked";
-        body = isAr ?
-            `تمت إضافتك كمراقب للمريض ${data.patientName}` :
-            `You have been linked as a caregiver for ${data.patientName}`;
-      }
-
-      // 3. Send message
-      const message = {
-        token: fcmToken,
+    const response = await admin.messaging().send({
+      token,
+      notification: {title, body},
+      data: {
+        notificationId,
+        caregiverUid,
+        type: String(notification.type || "missedDose"),
+        patientId: String(notification.patientId || ""),
+        patientName: String(notification.patientName || ""),
+        medicationName: String(notification.medicationName || ""),
+        language: String(notification.language || "en"),
+      },
+      android: {
+        priority: "high",
         notification: {
-          title: title,
-          body: body,
+          channelId: "med360_caregiver_alerts",
         },
-        data: {
-          notificationId: data.id,
-          type: data.type,
-          click_action: "FLUTTER_NOTIFICATION_CLICK",
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
         },
-      };
-
-      try {
-        const response = await admin.messaging().send(message);
-        console.log("Successfully sent notification:", response);
-        return snapshot.ref.update({delivered: true, deliveredAt: admin.firestore.FieldValue.serverTimestamp()});
-      } catch (error) {
-        console.error("Error sending notification:", error);
-        return null;
-      }
+      },
     });
+
+    await snapshot.ref.set(
+      {
+        delivered: true,
+        deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        messageId: response,
+      },
+      {merge: true},
+    );
+  },
+);

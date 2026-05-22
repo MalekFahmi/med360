@@ -9,7 +9,8 @@ import '../../services/notification_service.dart';
 class MedicationsScreen extends StatelessWidget {
   const MedicationsScreen({super.key});
 
-  Future<void> _openMedicationForm(BuildContext context, {Medication? med}) async {
+  Future<void> _openMedicationForm(BuildContext context,
+      {Medication? med}) async {
     final auth = context.read<AuthProvider>();
     final medProv = context.read<MedicationProvider>();
     final adhProv = context.read<AdherenceProvider>();
@@ -102,7 +103,8 @@ class MedicationsScreen extends StatelessWidget {
           : medProv.isEmpty
               ? EmptyState(
                   icon: Icons.medication_outlined,
-                  title: isAr ? 'لم تقم بإضافة أدوية بعد' : 'No medications yet',
+                  title:
+                      isAr ? 'لم تقم بإضافة أدوية بعد' : 'No medications yet',
                   subtitle: isAr
                       ? 'أضف اسم الدواء والجرعة وأوقات التذكير'
                       : 'Add each medication with its dose and reminder times',
@@ -132,7 +134,9 @@ class MedicationsScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    med.reminderTimes.map((t) => t.display).join(', '),
+                                    med.reminderTimes
+                                        .map((t) => t.display)
+                                        .join(', '),
                                     style: AppTextStyles.medDetail,
                                   ),
                                   const SizedBox(height: 8),
@@ -141,7 +145,9 @@ class MedicationsScreen extends StatelessWidget {
                                     runSpacing: 6,
                                     children: [
                                       AppBadge(
-                                        label: isAr ? med.formLabelAr : med.formLabel,
+                                        label: isAr
+                                            ? med.formLabelAr
+                                            : med.formLabel,
                                         variant: BadgeVariant.teal,
                                       ),
                                       AppBadge(
@@ -162,13 +168,17 @@ class MedicationsScreen extends StatelessWidget {
                                 if (value == 'edit') {
                                   await _openMedicationForm(context, med: med);
                                 } else if (value == 'pause') {
-                                  await medProv.pauseMedication(auth.patient!.id, med.id);
-                                  await NotificationService().cancelMedicationReminders(med);
+                                  await medProv.pauseMedication(
+                                      auth.patient!.id, med.id);
+                                  await NotificationService()
+                                      .cancelMedicationReminders(med);
                                 } else if (value == 'resume') {
-                                  await medProv.resumeMedication(auth.patient!.id, med.id);
+                                  await medProv.resumeMedication(
+                                      auth.patient!.id, med.id);
                                   final updated = medProv.findById(med.id);
                                   if (updated != null) {
-                                    await NotificationService().scheduleMedicationReminders(
+                                    await NotificationService()
+                                        .scheduleMedicationReminders(
                                       updated,
                                       isArabic: isAr,
                                     );
@@ -251,7 +261,8 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
     _form = med?.form ?? MedicationForm.tablet;
     _reminderType = med?.reminderType ?? ReminderType.notification;
     _status = med?.status ?? MedicationStatus.active;
-    _times = List.of(med?.reminderTimes ?? [const ReminderTime(hour: 8, minute: 0)]);
+    _times =
+        List.of(med?.reminderTimes ?? [const ReminderTime(hour: 8, minute: 0)]);
   }
 
   @override
@@ -324,10 +335,9 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
                   labelText: isAr ? 'اسم الدواء' : 'Medication name',
                 ),
                 textCapitalization: TextCapitalization.words,
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل اسم الدواء' : 'Enter a name')
-                        : null,
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? (isAr ? 'أدخل اسم الدواء' : 'Enter a name')
+                    : null,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
@@ -344,14 +354,13 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
                 decoration: InputDecoration(
                   labelText: isAr ? 'الجرعة، مثال 500mg' : 'Dosage, e.g. 500mg',
                 ),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty
-                        ? (isAr ? 'أدخل الجرعة' : 'Enter a dosage')
-                        : null,
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? (isAr ? 'أدخل الجرعة' : 'Enter a dosage')
+                    : null,
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<MedicationForm>(
-                initialValue: _form,
+                value: _form,
                 decoration: InputDecoration(labelText: isAr ? 'الشكل' : 'Form'),
                 items: MedicationForm.values
                     .map((form) => DropdownMenuItem(
@@ -367,7 +376,8 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
               TextFormField(
                 controller: _conditionCtrl,
                 decoration: InputDecoration(
-                  labelText: isAr ? 'يستخدم لـ (اختياري)' : 'Used for (optional)',
+                  labelText:
+                      isAr ? 'يستخدم لـ (اختياري)' : 'Used for (optional)',
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
@@ -412,7 +422,7 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<ReminderType>(
-                initialValue: _reminderType,
+                value: _reminderType,
                 decoration: InputDecoration(
                   labelText: isAr ? 'نوع التذكير' : 'Reminder type',
                 ),
@@ -442,7 +452,8 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
                   onPressed: _save,
                   icon: const Icon(Icons.check_rounded),
                   label: Text(isAr ? 'حفظ الدواء' : 'Save medication'),
-                  style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+                  style:
+                      FilledButton.styleFrom(backgroundColor: AppColors.teal),
                 ),
               ),
             ],

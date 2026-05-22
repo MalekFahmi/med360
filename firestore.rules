@@ -1,34 +1,63 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can read/write their own user document
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      // Allow searching caregivers by email
-      allow read: if request.auth != null && resource.data.role == 'caregiver';
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // Patients can read/write their own patient data
-    match /patients/{patientId} {
-      allow read, write: if request.auth != null && request.auth.uid == patientId;
+    function isCaregiver(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && get(/databases/$(database)/documents/users/$(uid)).data.role == "caregiver";
+    }
 
-      match /caregivers/{caregiverId} {
-        allow read, write: if request.auth != null && (request.auth.uid == patientId || request.auth.uid == caregiverId);
+    function isPatientOwner(patientId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "patient"
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.patientId == patientId;
+    }
+
+    function isLinkedCaregiver(patientId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/patientCaregivers/$(patientId + "_" + request.auth.uid));
+    }
+
+    match /users/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow read, update: if signedIn() && request.auth.uid == uid;
+      allow list: if signedIn();
+    }
+
+    match /patients/{patientId} {
+      allow read: if isPatientOwner(patientId) || isLinkedCaregiver(patientId);
+      allow create, update, delete: if isPatientOwner(patientId);
+
+      match /caregivers/{caregiverUid} {
+        allow read: if isPatientOwner(patientId) || request.auth.uid == caregiverUid;
+        allow write: if isPatientOwner(patientId);
       }
 
       match /caregiverNotifications/{notificationId} {
-        allow read, write: if request.auth != null && request.auth.uid == patientId;
+        allow read: if isPatientOwner(patientId) || isLinkedCaregiver(patientId);
+        allow write: if isPatientOwner(patientId);
       }
     }
 
-    // Relationships between patients and caregivers
     match /patientCaregivers/{relationshipId} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn()
+        && (resource.data.caregiverUid == request.auth.uid || isPatientOwner(resource.data.patientId));
+      allow create, update, delete: if isPatientOwner(request.resource.data.patientId);
     }
 
-    // Caregiver Inboxes
-    match /caregiverInboxes/{caregiverUid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == caregiverUid;
+    match /caregiverInboxes/{caregiverUid}/notifications/{notificationId} {
+      allow read, update: if isCaregiver(caregiverUid);
+      allow create: if signedIn();
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

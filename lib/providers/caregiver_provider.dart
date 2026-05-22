@@ -12,10 +12,14 @@ class CaregiverProvider extends ChangeNotifier {
   CaregiverProvider(this._db);
 
   List<CaregiverNotification> _notifications = [];
+  List<Map<String, dynamic>> _linkedPatients = [];
   LoadStatus _status = LoadStatus.initial;
+  String? _caregiverUid;
   StreamSubscription? _subscription;
+  StreamSubscription? _relationshipsSubscription;
 
   List<CaregiverNotification> get notifications => _notifications;
+  List<Map<String, dynamic>> get linkedPatients => _linkedPatients;
   bool get isLoading => _status == LoadStatus.loading;
   int get unreadCount => _notifications.where((n) => !n.acknowledged).length;
 
@@ -27,38 +31,54 @@ class CaregiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clear() {
-    _notifications = [];
-    _subscription?.cancel();
-    notifyListeners();
+  void listenToCaregiverData(String caregiverUid) {
+    listenToInboundAlerts(caregiverUid);
+    listenToLinkedPatients(caregiverUid);
   }
 
-  void listenToInboundAlerts(String uid) {
+  void listenToLinkedPatients(String caregiverUid) {
+    _relationshipsSubscription?.cancel();
+    final firestore = FirebaseFirestore.instance;
+    _relationshipsSubscription = firestore
+        .collection('patientCaregivers')
+        .where('caregiverUid', isEqualTo: caregiverUid)
+        .snapshots()
+        .listen((snapshot) async {
+      final patients = <Map<String, dynamic>>[];
+      for (final doc in snapshot.docs) {
+        final patientId = doc.data()['patientId'] as String?;
+        if (patientId == null) continue;
+        final patientDoc =
+            await firestore.collection('patients').doc(patientId).get();
+        final patientData = patientDoc.data() ?? {};
+        patients.add({
+          'patientId': patientId,
+          'name': patientData['name'] ?? patientId,
+          'phone': patientData['phone'] ?? '',
+          'linkedAt': doc.data()['linkedAt'],
+        });
+      }
+      _linkedPatients = patients;
+      notifyListeners();
+    });
+  }
+
+  void listenToInboundAlerts(String caregiverUid) {
     _subscription?.cancel();
+    _caregiverUid = caregiverUid;
     final firestore = FirebaseFirestore.instance;
 
     _subscription = firestore
         .collection('caregiverInboxes')
-        .doc(uid)
+        .doc(caregiverUid)
         .collection('notifications')
         .orderBy('sentAt', descending: true)
         .snapshots()
         .listen((snapshot) {
-      bool changed = false;
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          final data = change.doc.data();
-          if (data != null) {
-            final notif = _mapFirestoreToNotification(data);
-            if (!_notifications.any((n) => n.id == notif.id)) {
-              _notifications = [notif, ..._notifications];
-              _db.insertCaregiverNotification(notif.caregiverId, notif);
-              changed = true;
-            }
-          }
-        }
-      }
-      if (changed) notifyListeners();
+      _notifications = snapshot.docs
+          .map((doc) => _mapFirestoreToNotification(doc.data()))
+          .toList();
+      notifyListeners();
     });
   }
 
@@ -71,17 +91,27 @@ class CaregiverProvider extends ChangeNotifier {
       patientName: data['patientName'] ?? '',
       medicationId: data['medicationId'],
       medicationName: data['medicationName'],
-      missedAt: data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,
-      sentAt: (data['sentAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      missedAt:
+          data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,
+      sentAt: _readDate(data['sentAt']) ??
+          _readDate(data['createdAt']) ??
+          DateTime.now(),
       channel: NotificationChannel.inApp,
       acknowledged: data['acknowledged'] ?? false,
       type: data['type'] ?? 'missedDose',
     );
   }
 
+  DateTime? _readDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
   @override
   void dispose() {
     _subscription?.cancel();
+    _relationshipsSubscription?.cancel();
     super.dispose();
   }
 
@@ -102,8 +132,6 @@ class CaregiverProvider extends ChangeNotifier {
           id: 'N-${DateTime.now().millisecondsSinceEpoch}-$id',
           caregiverId: id,
           caregiverName: cg.name,
-          patientId: patientId,
-          patientName: patientName,
           medicationId: medicationId,
           medicationName: medicationName,
           missedAt: missedAt,
@@ -125,6 +153,14 @@ class CaregiverProvider extends ChangeNotifier {
   }
 
   Future<void> markAsRead(String notifId) async {
+    if (_caregiverUid != null) {
+      await FirebaseFirestore.instance
+          .collection('caregiverInboxes')
+          .doc(_caregiverUid)
+          .collection('notifications')
+          .doc(notifId)
+          .set({'acknowledged': true}, SetOptions(merge: true));
+    }
     await _db.markNotificationRead(notifId);
     _notifications = _notifications
         .map((n) => n.id == notifId ? n.copyWith(acknowledged: true) : n)
@@ -133,9 +169,8 @@ class CaregiverProvider extends ChangeNotifier {
   }
 
   void markAllAsRead() {
-    _notifications = _notifications
-        .map((n) => n.copyWith(acknowledged: true))
-        .toList();
+    _notifications =
+        _notifications.map((n) => n.copyWith(acknowledged: true)).toList();
     notifyListeners();
   }
 

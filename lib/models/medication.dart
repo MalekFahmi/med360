@@ -2,8 +2,19 @@
 // The patient creates and owns all their medication records directly.
 
 enum ReminderType { notification, alarm }
+
 enum MedicationStatus { active, paused, completed }
-enum MedicationForm { tablet, capsule, liquid, injection, drops, inhaler, patch, other }
+
+enum MedicationForm {
+  tablet,
+  capsule,
+  liquid,
+  injection,
+  drops,
+  inhaler,
+  patch,
+  other
+}
 
 class ReminderTime {
   final int hour;
@@ -21,8 +32,7 @@ class ReminderTime {
 
   factory ReminderTime.fromString(String s) {
     final parts = s.split(':');
-    return ReminderTime(
-        hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    return ReminderTime(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
   }
 }
 
@@ -30,9 +40,9 @@ class Medication {
   final String id;
   final String name;
   final String nameAr;
-  final String dosage;         // e.g. "500mg"
+  final String dosage; // e.g. "500mg"
   final MedicationForm form;
-  final String indication;     // what it's for — entered by patient
+  final String indication; // what it's for — entered by patient
   final String indicationAr;
   final List<ReminderTime> reminderTimes;
   final ReminderType reminderType;
@@ -61,26 +71,26 @@ class Medication {
   String get displayNameAr => '$nameAr $dosage';
 
   String get formLabel => switch (form) {
-    MedicationForm.tablet   => 'Tablet',
-    MedicationForm.capsule  => 'Capsule',
-    MedicationForm.liquid   => 'Liquid',
-    MedicationForm.injection => 'Injection',
-    MedicationForm.drops    => 'Drops',
-    MedicationForm.inhaler  => 'Inhaler',
-    MedicationForm.patch    => 'Patch',
-    MedicationForm.other    => 'Other',
-  };
+        MedicationForm.tablet => 'Tablet',
+        MedicationForm.capsule => 'Capsule',
+        MedicationForm.liquid => 'Liquid',
+        MedicationForm.injection => 'Injection',
+        MedicationForm.drops => 'Drops',
+        MedicationForm.inhaler => 'Inhaler',
+        MedicationForm.patch => 'Patch',
+        MedicationForm.other => 'Other',
+      };
 
   String get formLabelAr => switch (form) {
-    MedicationForm.tablet   => 'قرص',
-    MedicationForm.capsule  => 'كبسولة',
-    MedicationForm.liquid   => 'سائل',
-    MedicationForm.injection => 'حقنة',
-    MedicationForm.drops    => 'قطرات',
-    MedicationForm.inhaler  => 'بخاخ',
-    MedicationForm.patch    => 'لصقة',
-    MedicationForm.other    => 'أخرى',
-  };
+        MedicationForm.tablet => 'قرص',
+        MedicationForm.capsule => 'كبسولة',
+        MedicationForm.liquid => 'سائل',
+        MedicationForm.injection => 'حقنة',
+        MedicationForm.drops => 'قطرات',
+        MedicationForm.inhaler => 'بخاخ',
+        MedicationForm.patch => 'لصقة',
+        MedicationForm.other => 'أخرى',
+      };
 
   String get frequencyLabel {
     final n = reminderTimes.length;
@@ -103,38 +113,38 @@ class Medication {
   }
 
   Map<String, dynamic> toMap() => {
-    'id': id,
-    'name': name,
-    'nameAr': nameAr,
-    'dosage': dosage,
-    'form': form.name,
-    'indication': indication,
-    'indicationAr': indicationAr,
-    'reminderTimes': reminderTimes.map((t) => t.toMap()).toList(),
-    'reminderType': reminderType.name,
-    'status': status.name,
-    'startDate': startDate.toIso8601String(),
-    'notes': notes,
-    'notesAr': notesAr,
-  };
+        'id': id,
+        'name': name,
+        'nameAr': nameAr,
+        'dosage': dosage,
+        'form': form.name,
+        'indication': indication,
+        'indicationAr': indicationAr,
+        'reminderTimes': reminderTimes.map((t) => t.toMap()).toList(),
+        'reminderType': reminderType.name,
+        'status': status.name,
+        'startDate': startDate.toIso8601String(),
+        'notes': notes,
+        'notesAr': notesAr,
+      };
 
   factory Medication.fromMap(Map<String, dynamic> m) => Medication(
-    id: m['id'],
-    name: m['name'],
-    nameAr: m['nameAr'] ?? m['name'],
-    dosage: m['dosage'],
-    form: MedicationForm.values.byName(m['form']),
-    indication: m['indication'] ?? '',
-    indicationAr: m['indicationAr'] ?? '',
-    reminderTimes: (m['reminderTimes'] as List)
-        .map((t) => ReminderTime.fromMap(t))
-        .toList(),
-    reminderType: ReminderType.values.byName(m['reminderType']),
-    status: MedicationStatus.values.byName(m['status']),
-    startDate: DateTime.parse(m['startDate']),
-    notes: m['notes'],
-    notesAr: m['notesAr'],
-  );
+        id: m['id'],
+        name: m['name'],
+        nameAr: m['nameAr'] ?? m['name'],
+        dosage: m['dosage'],
+        form: MedicationForm.values.byName(m['form']),
+        indication: m['indication'] ?? '',
+        indicationAr: m['indicationAr'] ?? '',
+        reminderTimes: (m['reminderTimes'] as List)
+            .map((t) => ReminderTime.fromMap(t))
+            .toList(),
+        reminderType: ReminderType.values.byName(m['reminderType']),
+        status: MedicationStatus.values.byName(m['status']),
+        startDate: DateTime.parse(m['startDate']),
+        notes: m['notes'],
+        notesAr: m['notesAr'],
+      );
 
   Medication copyWith({
     String? name,
