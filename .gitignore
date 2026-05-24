@@ -46,5 +46,7 @@ app.*.map.json
 
 # Local worker secrets
 external-worker/.env
-external-worker/*.json
+external-worker/service-account*.json
+external-worker/firebase-service-account*.json
+external-worker/node_modules/
 external-worker/secrets/

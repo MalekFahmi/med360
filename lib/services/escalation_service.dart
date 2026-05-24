@@ -205,6 +205,8 @@ class EscalationService {
         id: 'MISS-${dose.id}-${caregiver.id}',
         caregiverId: caregiver.id,
         caregiverName: caregiver.name,
+        patientId: patient.id,
+        patientName: patient.name,
         medicationId: dose.medicationId,
         medicationName: dose.medicationName,
         missedAt: dose.confirmedAt ?? DateTime.now(),

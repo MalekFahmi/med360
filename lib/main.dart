@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 
 import 'services/local_db_service.dart';
 import 'services/notification_service.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/firebase_backend_service.dart';
 import 'services/escalation_service.dart';
 import 'providers/auth_provider.dart';
@@ -22,18 +21,9 @@ import 'ui/screens/adherence_screen.dart';
 import 'ui/screens/caregiver_screen.dart';
 import 'ui/screens/caregiver_dashboard_screen.dart';
 import 'ui/screens/settings_screen.dart';
-import 'ui/screens/caregiver_dashboard_screen.dart';
-
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // If you're going to use other Firebase services in the background, such as Firestore,
-  // make sure you call `initializeApp` before using other Firebase services.
-  // In this app, the notification is handled by the OS if it contains a 'notification' block.
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   await NotificationService().init();
   await FirebaseBackendService().init();
   await EscalationService().initWorkmanager();
@@ -178,9 +168,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Future<void> _loadData() async {
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
-    final medicationProvider = context.read<MedicationProvider>();
-    final adherenceProvider = context.read<AdherenceProvider>();
-    final reportProvider = context.read<ReportProvider>();
 
     if (auth.patient != null) {
       final pId = auth.patient!.id;

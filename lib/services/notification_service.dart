@@ -102,9 +102,9 @@ class NotificationService {
 
       await _plugin.zonedSchedule(
         id: id,
-        title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø¨Ø§Ù„Ø¯ÙˆØ§Ø¡' : 'Medication Reminder',
+        title: isArabic ? 'تذكير بالدواء' : 'Medication Reminder',
         body: isArabic
-            ? 'Ø­Ø§Ù† ÙˆÙ‚Øª ØªÙ†Ø§ÙˆÙ„ ${med.nameAr} (${med.dosage})'
+            ? 'حان وقت تناول ${med.nameAr} (${med.dosage})'
             : 'Time to take ${med.name} (${med.dosage})',
         scheduledDate: _nextInstanceOfTime(time.hour, time.minute),
         notificationDetails: NotificationDetails(
@@ -148,9 +148,9 @@ class NotificationService {
 
     await _plugin.zonedSchedule(
       id: _doseNotificationId(dose.id, 'second'),
-      title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø«Ø§Ù†' : 'Second Medication Reminder',
+      title: isArabic ? 'تذكير ثان' : 'Second Medication Reminder',
       body: isArabic
-          ? 'Ù„Ù… ÙŠØªÙ… ØªØ£ÙƒÙŠØ¯ Ø¬Ø±Ø¹Ø© ${dose.medicationName} Ø¨Ø¹Ø¯.'
+          ? 'لم يتم تأكيد جرعة ${dose.medicationName} بعد.'
           : '${dose.medicationName} has not been marked as taken yet.',
       scheduledDate: tz.TZDateTime.from(secondReminderAt, tz.local),
       notificationDetails: const NotificationDetails(
@@ -184,9 +184,9 @@ class NotificationService {
 
     await _plugin.show(
       id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      title: isArabic ? 'ØªÙ†Ø¨ÙŠÙ‡ Ø¬Ø±Ø¹Ø© ÙØ§Ø¦ØªØ©' : 'Missed dose alert',
+      title: isArabic ? 'تنبيه جرعة فائتة' : 'Missed dose alert',
       body: isArabic
-          ? 'ÙØ§ØªØª Ø¬Ø±Ø¹Ø© $medicationName Ù„Ù„Ù…Ø±ÙŠØ¶ $patientName'
+          ? 'فاتت جرعة $medicationName للمريض $patientName'
           : '$patientName missed $medicationName',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(

@@ -28,7 +28,7 @@ class LocalDbService {
         version: 3,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
-        onOpen: _ensureCaregiverEmailColumn,
+        onOpen: _ensureSchema,
       );
     }
     final path = join(await getDatabasesPath(), 'med360.db');
@@ -37,7 +37,7 @@ class LocalDbService {
       version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
-      onOpen: _ensureCaregiverEmailColumn,
+      onOpen: _ensureSchema,
     );
   }
 
@@ -48,6 +48,13 @@ class LocalDbService {
     if (oldVersion < 3) {
       await _ensureDoseEscalationColumns(db);
     }
+    await _ensureCaregiverNotificationPatientNameColumn(db);
+  }
+
+  Future<void> _ensureSchema(Database db) async {
+    await _ensureCaregiverEmailColumn(db);
+    await _ensureDoseEscalationColumns(db);
+    await _ensureCaregiverNotificationPatientNameColumn(db);
   }
 
   Future<void> _ensureCaregiverEmailColumn(Database db) async {
@@ -73,6 +80,23 @@ class LocalDbService {
     if (!hasSecondReminder) {
       await db.execute(
         'ALTER TABLE dose_confirmations ADD COLUMN secondReminderSent INTEGER DEFAULT 0',
+      );
+    }
+  }
+
+  Future<void> _ensureCaregiverNotificationPatientNameColumn(
+      Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'caregiver_notifications'",
+    );
+    if (tables.isEmpty) return;
+    final columns =
+        await db.rawQuery('PRAGMA table_info(caregiver_notifications)');
+    final hasPatientName =
+        columns.any((column) => column['name'] == 'patientName');
+    if (!hasPatientName) {
+      await db.execute(
+        "ALTER TABLE caregiver_notifications ADD COLUMN patientName TEXT DEFAULT ''",
       );
     }
   }
@@ -407,6 +431,7 @@ class LocalDbService {
         {
           'id': n.id,
           'patientId': patientId,
+          'patientName': n.patientName,
           'caregiverId': n.caregiverId,
           'caregiverName': n.caregiverName,
           'medicationId': n.medicationId,
@@ -420,7 +445,7 @@ class LocalDbService {
   }
 
   Future<List<CaregiverNotification>> getCaregiverNotifications(
-      String userId) async {
+      String patientId) async {
     final d = await db;
     // For local simplicity, we'll fetch all; ideally we filter by patientId OR caregiverId
     final rows = await d.query('caregiver_notifications',
@@ -430,6 +455,8 @@ class LocalDbService {
               id: r['id'] as String,
               caregiverId: r['caregiverId'] as String,
               caregiverName: r['caregiverName'] as String,
+              patientId: r['patientId'] as String,
+              patientName: r['patientName'] as String,
               medicationId: r['medicationId'] as String?,
               medicationName: r['medicationName'] as String?,
               missedAt: r['missedAt'] != null

@@ -142,6 +142,8 @@ class CaregiverProvider extends ChangeNotifier {
           id: 'MISS-$doseId-$id',
           caregiverId: id,
           caregiverName: cg.name,
+          patientId: patientId,
+          patientName: patientName,
           medicationId: medicationId,
           medicationName: medicationName,
           missedAt: missedAt,
