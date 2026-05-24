@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
@@ -10,6 +12,7 @@ enum AccountRole { patient, caregiver }
 
 class AuthProvider extends ChangeNotifier {
   final LocalDbService _db;
+  final _fbAuth = fb_auth.FirebaseAuth.instance;
 
   AuthProvider(this._db);
 
@@ -115,10 +118,10 @@ class AuthProvider extends ChangeNotifier {
       }
 
       final newPatient = PatientUser(
-        id: 'PAT-${DateTime.now().millisecondsSinceEpoch}',
+        id: uid,
         name: name,
         phone: phone,
-        passwordHash: _hashPassword(password), // simple hash for demo
+        passwordHash: _hashPassword(password),
         dateOfBirth: dateOfBirth,
         chronicCondition: chronicCondition,
         caregivers: [],
@@ -136,7 +139,7 @@ class AuthProvider extends ChangeNotifier {
       _role = AccountRole.patient;
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('loggedInPatientId', newPatient.id);
+      await prefs.setString('loggedInPatientId', uid);
 
       _status = AuthStatus.authenticated;
       notifyListeners();
@@ -195,7 +198,7 @@ class AuthProvider extends ChangeNotifier {
       _caregiver = null;
       _role = AccountRole.patient;
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('loggedInPatientId', p.id);
+      await prefs.setString('loggedInPatientId', uid);
 
       _status = AuthStatus.authenticated;
       notifyListeners();

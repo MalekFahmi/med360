@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
 import 'notification_service.dart';
+import '../firebase_options.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
