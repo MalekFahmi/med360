@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: med360-external-worker
+    runtime: node
+    rootDir: external-worker
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: POLL_INTERVAL_SECONDS
+        value: "60"
+      - key: AUTO_MISS_DELAY_MINUTES
+        value: "5"
+      - key: MAX_DOSES_PER_POLL
+        value: "100"
+      - key: MAX_NOTIFICATIONS_PER_POLL
+        value: "100"
+      - key: FIREBASE_SERVICE_ACCOUNT_BASE64
+        sync: false

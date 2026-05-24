@@ -47,12 +47,21 @@ class CaregiverProvider extends ChangeNotifier {
       final patients = <Map<String, dynamic>>[];
       for (final doc in snapshot.docs) {
         final patientId = doc.data()['patientId'] as String?;
-        if (patientId == null) continue;
-        final patientDoc =
-            await firestore.collection('patients').doc(patientId).get();
-        final patientData = patientDoc.data() ?? {};
+        final idParts = doc.id.split('_');
+        final patientUid = doc.data()['patientUid'] as String? ??
+            (idParts.isEmpty ? null : idParts.first);
+        if (patientUid == null && patientId == null) continue;
+        var patientDoc = patientUid == null
+            ? null
+            : await firestore.collection('patients').doc(patientUid).get();
+        if ((patientDoc == null || !patientDoc.exists) && patientId != null) {
+          patientDoc =
+              await firestore.collection('patients').doc(patientId).get();
+        }
+        final patientData = patientDoc?.data() ?? {};
         patients.add({
           'patientId': patientId,
+          'patientUid': patientUid,
           'name': patientData['name'] ?? patientId,
           'phone': patientData['phone'] ?? '',
           'linkedAt': doc.data()['linkedAt'],
@@ -117,6 +126,7 @@ class CaregiverProvider extends ChangeNotifier {
     required String patientId,
     required List<String> caregiverIds,
     required List<Caregiver> allCaregivers,
+    required String doseId,
     required String medicationId,
     required String medicationName,
     required DateTime missedAt,
@@ -127,7 +137,7 @@ class CaregiverProvider extends ChangeNotifier {
       try {
         final cg = allCaregivers.firstWhere((c) => c.id == id);
         final notif = CaregiverNotification(
-          id: 'N-${DateTime.now().millisecondsSinceEpoch}-$id',
+          id: 'MISS-$doseId-$id',
           caregiverId: id,
           caregiverName: cg.name,
           medicationId: medicationId,
@@ -166,7 +176,26 @@ class CaregiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void markAllAsRead() {
+  Future<void> markAllAsRead() async {
+    if (_caregiverUid != null) {
+      final batch = FirebaseFirestore.instance.batch();
+      final unreadIds = _notifications
+          .where((notification) => !notification.acknowledged)
+          .map((notification) => notification.id);
+      for (final id in unreadIds) {
+        batch.set(
+          FirebaseFirestore.instance
+              .collection('caregiverInboxes')
+              .doc(_caregiverUid)
+              .collection('notifications')
+              .doc(id),
+          {'acknowledged': true},
+          SetOptions(merge: true),
+        );
+        await _db.markNotificationRead(id);
+      }
+      await batch.commit();
+    }
     _notifications =
         _notifications.map((n) => n.copyWith(acknowledged: true)).toList();
     notifyListeners();

@@ -42,6 +42,7 @@ class DashboardScreen extends StatelessWidget {
         patientId: auth.patient!.id,
         caregiverIds: cgIds,
         allCaregivers: auth.caregivers,
+        doseId: dose.id,
         medicationId: dose.medicationId,
         medicationName: dose.medicationName,
         missedAt: DateTime.now(),

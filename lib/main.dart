@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'services/local_db_service.dart';
 import 'services/notification_service.dart';
 import 'services/firebase_backend_service.dart';
+import 'services/escalation_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/medication_provider.dart';
 import 'providers/adherence_provider.dart';
@@ -25,6 +26,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService().init();
   await FirebaseBackendService().init();
+  await EscalationService().initWorkmanager();
   runApp(const Med360App());
 }
 
@@ -138,7 +140,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
   Timer? _autoMissedTimer;
   final List<Widget> _screens = const [
@@ -152,7 +154,15 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _markOverdueDosesAndNotify();
+    }
   }
 
   Future<void> _loadData() async {
@@ -160,19 +170,22 @@ class _MainShellState extends State<MainShell> {
     final auth = context.read<AuthProvider>();
     if (auth.patient != null) {
       final pId = auth.patient!.id;
-      final phone = auth.patient!.phone;
       final medicationProvider = context.read<MedicationProvider>();
       final adherenceProvider = context.read<AdherenceProvider>();
       final reportProvider = context.read<ReportProvider>();
-      final caregiverProvider = context.read<CaregiverProvider>();
 
       await FirebaseBackendService().registerPatientDevice(auth.patient!);
-      caregiverProvider.listenToInboundAlerts(phone);
       await NotificationService().requestPermissions();
       await medicationProvider.loadMedications(pId);
       final meds = medicationProvider.medications;
       await adherenceProvider.loadAndGenerate(
-          patientId: pId, medications: meds);
+        patientId: pId,
+        medications: meds,
+        patientName: auth.patient!.name,
+        caregivers: auth.caregivers,
+        caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+        isArabic: auth.arabicMode,
+      );
       await _markOverdueDosesAndNotify();
       _startAutoMissedTimer();
       if (!mounted) return;
@@ -225,6 +238,7 @@ class _MainShellState extends State<MainShell> {
         caregiverIds: caregiverIds,
         allCaregivers: auth.caregivers,
         medicationId: dose.medicationId,
+        doseId: dose.id,
         medicationName: dose.medicationName,
         missedAt: DateTime.now(),
         patientName: patient.name,
@@ -235,6 +249,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoMissedTimer?.cancel();
     super.dispose();
   }

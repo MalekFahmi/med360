@@ -74,3 +74,106 @@ exports.sendCaregiverNotification = onDocumentCreated(
     );
   },
 );
+
+exports.autoMissPatientDose = onDocumentCreated(
+  {
+    document: "patientDoses/{doseId}",
+    timeoutSeconds: 540,
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const dose = snapshot.data();
+    if (!dose || dose.status !== "pending") return;
+
+    const scheduledAt = dose.scheduledAt && dose.scheduledAt.toDate ?
+      dose.scheduledAt.toDate() :
+      null;
+    if (!scheduledAt) {
+      logger.warn("Dose missing scheduledAt", {doseId: event.params.doseId});
+      return;
+    }
+
+    const missAt = new Date(scheduledAt.getTime() + 5 * 60 * 1000);
+    const delayMs = missAt.getTime() - Date.now();
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    const doseRef = snapshot.ref;
+    const latest = await doseRef.get();
+    if (!latest.exists) return;
+
+    const latestDose = latest.data();
+    if (!latestDose || latestDose.status !== "pending") return;
+
+    const caregiverIds = Array.isArray(latestDose.caregiverIds) ?
+      latestDose.caregiverIds :
+      [];
+    const shouldNotify =
+      latestDose.caregiverAlertsEnabled === true && caregiverIds.length > 0;
+    const now = new Date();
+
+    await doseRef.set(
+      {
+        status: "missed",
+        confirmedAt: now.toISOString(),
+        caregiverNotified: shouldNotify,
+        secondReminderSent: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      {merge: true},
+    );
+
+    if (!shouldNotify) return;
+
+    const batch = admin.firestore().batch();
+    for (const caregiverUid of caregiverIds) {
+      const notificationId = `MISS-${latestDose.id}-${caregiverUid}`;
+      const payload = {
+        id: notificationId,
+        caregiverId: caregiverUid,
+        patientId: String(latestDose.patientId || ""),
+        patientUid: String(latestDose.ownerUid || ""),
+        patientName: String(latestDose.patientName || "Patient"),
+        medicationId: String(latestDose.medicationId || ""),
+        medicationName: String(latestDose.medicationName || "medication"),
+        missedAt: now.toISOString(),
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        channel: "both",
+        acknowledged: false,
+        title: latestDose.language === "ar" ?
+          "تنبيه جرعة فائتة" :
+          "Missed Medication Alert",
+        body: latestDose.language === "ar" ?
+          `${latestDose.patientName || "Patient"} فات جرعة ${latestDose.medicationName || "دواء"}.` :
+          `${latestDose.patientName || "Patient"} missed ${latestDose.medicationName || "a scheduled medication"}.`,
+        language: String(latestDose.language || "en"),
+        type: "missedDose",
+        delivered: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      const inboxRef = admin
+        .firestore()
+        .collection("caregiverInboxes")
+        .doc(caregiverUid)
+        .collection("notifications")
+        .doc(notificationId);
+      batch.set(inboxRef, payload, {merge: true});
+
+      if (latestDose.ownerUid) {
+        const patientAlertRef = admin
+          .firestore()
+          .collection("patients")
+          .doc(String(latestDose.ownerUid))
+          .collection("caregiverNotifications")
+          .doc(notificationId);
+        batch.set(patientAlertRef, payload, {merge: true});
+      }
+    }
+
+    await batch.commit();
+  },
+);

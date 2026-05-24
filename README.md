@@ -53,6 +53,10 @@ flutter run
 
 For real caregiver push notifications across devices, follow [FIREBASE_SETUP.md](FIREBASE_SETUP.md).
 
+If the Firebase project cannot use the Blaze plan, run the external worker in
+[external-worker](external-worker). It marks overdue doses as missed and sends
+caregiver FCM push notifications from a separate Node server.
+
 ## Verification
 
 ```bash

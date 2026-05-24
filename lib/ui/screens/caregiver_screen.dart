@@ -18,8 +18,8 @@ class CaregiverScreen extends StatelessWidget {
     );
     if (request == null || !context.mounted) return;
 
-    final ok = await context.read<AuthProvider>().addCaregiverByPhone(
-          phone: request.phone,
+    final ok = await context.read<AuthProvider>().addCaregiverByEmail(
+          email: request.email,
           relationship: request.relationship,
           permission: request.permission,
         );
@@ -29,7 +29,7 @@ class CaregiverScreen extends StatelessWidget {
       content: Text(ok
           ? 'Caregiver account linked'
           : context.read<AuthProvider>().errorMessage ??
-              'No caregiver account was found for that phone number'),
+              'No caregiver account was found for that email'),
       backgroundColor: ok ? AppColors.teal : AppColors.red,
       behavior: SnackBarBehavior.floating,
     ));
@@ -79,7 +79,7 @@ class CaregiverScreen extends StatelessWidget {
                 icon: Icons.people_outline_rounded,
                 title: 'No linked caregiver accounts',
                 subtitle:
-                    'Ask the caregiver to sign up first, then link them with their registered phone number',
+                    'Ask the caregiver to sign up first, then link them with their registered email address',
               )
             else
               ...caregivers.map(
@@ -179,13 +179,13 @@ class _CaregiverFormSheet extends StatefulWidget {
 
 class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _relationCtrl = TextEditingController();
   NotificationPermission _permission = NotificationPermission.missedDoseOnly;
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
     _relationCtrl.dispose();
     super.dispose();
   }
@@ -195,7 +195,7 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
     Navigator.pop(
       context,
       _CaregiverLinkRequest(
-        phone: _phoneCtrl.text.trim(),
+        email: _emailCtrl.text.trim().toLowerCase(),
         relationship: _relationCtrl.text.trim(),
         permission: _permission,
       ),
@@ -220,21 +220,18 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
-                  labelText: 'Caregiver registered phone number',
-                  prefixIcon: Icon(Icons.phone_outlined),
+                  labelText: 'Caregiver registered email',
+                  prefixIcon: Icon(Icons.email_outlined),
                   border: OutlineInputBorder(borderRadius: AppRadius.md),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Enter the caregiver phone number';
+                    return 'Enter the caregiver email';
                   }
-                  if (value.trim().replaceAll(RegExp(r'[^0-9]'), '').length <
-                      7) {
-                    return 'Enter a valid phone number';
-                  }
+                  if (!value.contains('@')) return 'Enter a valid email';
                   return null;
                 },
               ),
@@ -295,12 +292,12 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
 }
 
 class _CaregiverLinkRequest {
-  final String phone;
+  final String email;
   final String relationship;
   final NotificationPermission permission;
 
   const _CaregiverLinkRequest({
-    required this.phone,
+    required this.email,
     required this.relationship,
     required this.permission,
   });

@@ -39,10 +39,28 @@ class AuthProvider extends ChangeNotifier {
     _status = AuthStatus.loading;
     notifyListeners();
     try {
-      final caregiver = await FirebaseBackendService().currentCaregiver();
+      final backend = FirebaseBackendService();
+      final caregiver = await backend.currentCaregiver();
       if (caregiver != null) {
         _caregiver = caregiver;
         _role = AccountRole.caregiver;
+        _status = AuthStatus.authenticated;
+        notifyListeners();
+        return;
+      }
+
+      final firebasePatient = await backend.currentPatient();
+      if (firebasePatient != null) {
+        final localPatient = await _db.getPatientById(firebasePatient.id);
+        final patient = localPatient ?? firebasePatient;
+        if (localPatient == null) {
+          await _db.insertPatient(patient);
+        }
+        _patient = patient;
+        _caregiver = null;
+        _role = AccountRole.patient;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('loggedInPatientId', patient.id);
         _status = AuthStatus.authenticated;
         notifyListeners();
         return;
@@ -60,7 +78,9 @@ class AuthProvider extends ChangeNotifier {
           return;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Auto-login failed: $e');
+    }
     _status = AuthStatus.unauthenticated;
     notifyListeners();
   }
@@ -78,7 +98,14 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Check phone not already registered
+      if (password.length < 6) {
+        _errorMessage = 'Password must be at least 6 characters.';
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+        return false;
+      }
+
+      // Check phone not already registered locally.
       final existing = await _db.getPatientByPhone(phone);
       if (existing != null) {
         _errorMessage = 'This phone number is already registered.';
@@ -98,11 +125,11 @@ class AuthProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
       );
 
-      await _db.insertPatient(newPatient);
       await FirebaseBackendService().registerPatientAuth(
         patient: newPatient,
         password: password,
       );
+      await _db.insertPatient(newPatient);
       await FirebaseBackendService().registerPatientDevice(newPatient);
       _patient = newPatient;
       _caregiver = null;
@@ -115,7 +142,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Sign up failed. Please try again.';
+      debugPrint('Patient sign up failed: $e');
+      _errorMessage = _friendlyAuthError(e, fallback: 'Sign up failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -129,22 +157,43 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final p = await _db.getPatientByPhone(phone);
-      if (p == null || p.passwordHash != _hashPassword(password)) {
+      final backend = FirebaseBackendService();
+      PatientUser? p = await _db.getPatientByPhone(phone);
+      if (p != null && p.passwordHash != _hashPassword(password)) {
         _errorMessage = 'Incorrect phone number or password.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
       }
 
-      _patient = p;
-      _caregiver = null;
-      _role = AccountRole.patient;
-      await FirebaseBackendService().loginPatientAuth(
+      if (p == null && !backend.isEnabled) {
+        _errorMessage = 'Incorrect phone number or password.';
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+        return false;
+      }
+
+      p ??= PatientUser(
+        id: 'PAT-${DateTime.now().millisecondsSinceEpoch}',
+        name: 'Patient',
+        phone: phone,
+        passwordHash: _hashPassword(password),
+        caregivers: const [],
+        createdAt: DateTime.now(),
+      );
+
+      await backend.loginPatientAuth(
         patient: p,
         password: password,
       );
-      await FirebaseBackendService().registerPatientDevice(p);
+      final cloudPatient =
+          await backend.currentPatient(passwordHash: _hashPassword(password));
+      p = cloudPatient ?? p;
+      await _db.insertPatient(p);
+      await backend.registerPatientDevice(p);
+      _patient = p;
+      _caregiver = null;
+      _role = AccountRole.patient;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', p.id);
 
@@ -152,7 +201,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Login failed. Please try again.';
+      debugPrint('Patient login failed: $e');
+      _errorMessage = _friendlyAuthError(e, fallback: 'Login failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -182,6 +232,12 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (password.length < 6) {
+        _errorMessage = 'Password must be at least 6 characters.';
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+        return false;
+      }
       _caregiver = await FirebaseBackendService().registerCaregiver(
         name: name,
         email: email,
@@ -357,4 +413,26 @@ class AuthProvider extends ChangeNotifier {
   // Simple deterministic hash for demo — replace with bcrypt in production
   String _hashPassword(String pw) =>
       pw.codeUnits.fold(0, (h, c) => h + c * 31).toString();
+
+  String _friendlyAuthError(Object error, {required String fallback}) {
+    final raw = error.toString();
+    if (raw.contains('weak-password')) {
+      return 'Password must be at least 6 characters.';
+    }
+    if (raw.contains('email-already-in-use')) {
+      return 'This account already exists. Try logging in.';
+    }
+    if (raw.contains('invalid-credential') ||
+        raw.contains('wrong-password') ||
+        raw.contains('user-not-found')) {
+      return 'Incorrect phone number or password.';
+    }
+    if (raw.contains('network-request-failed')) {
+      return 'Network error. Check your connection and try again.';
+    }
+    if (raw.contains('Firebase is not initialized')) {
+      return 'Firebase is not configured for this build.';
+    }
+    return fallback;
+  }
 }

@@ -40,6 +40,10 @@ class MedicationsScreen extends StatelessWidget {
     await adhProv.loadAndGenerate(
       patientId: auth.patient!.id,
       medications: medProv.medications,
+      patientName: auth.patient!.name,
+      caregivers: auth.caregivers,
+      caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+      isArabic: auth.arabicMode,
     );
   }
 
@@ -77,6 +81,10 @@ class MedicationsScreen extends StatelessWidget {
       await adhProv.loadAndGenerate(
         patientId: auth.patient!.id,
         medications: medProv.medications,
+        patientName: auth.patient!.name,
+        caregivers: auth.caregivers,
+        caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+        isArabic: auth.arabicMode,
       );
     }
   }

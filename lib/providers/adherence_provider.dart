@@ -1,14 +1,15 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/escalation_service.dart';
+import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
+import '../services/notification_service.dart';
 import '../services/dose_generator.dart';
 import 'medication_provider.dart' show LoadStatus;
 
 export 'medication_provider.dart' show LoadStatus;
 
 class AdherenceProvider extends ChangeNotifier {
-  static const missedGracePeriod = Duration(minutes: 5);
-
   final LocalDbService _db;
   AdherenceProvider(this._db);
 
@@ -82,6 +83,10 @@ class AdherenceProvider extends ChangeNotifier {
   Future<void> loadAndGenerate({
     required String patientId,
     required List<Medication> medications,
+    String patientName = 'Patient',
+    List<Caregiver> caregivers = const [],
+    bool caregiverAlertsEnabled = true,
+    bool isArabic = false,
   }) async {
     _status = LoadStatus.loading;
     notifyListeners();
@@ -100,6 +105,14 @@ class AdherenceProvider extends ChangeNotifier {
         await _db.insertDose(patientId, dose);
       }
       _allDoses = [..._allDoses, ...newDoses];
+      await _mirrorPendingDoses(
+        patientId: patientId,
+        patientName: patientName,
+        caregivers: caregivers,
+        caregiverAlertsEnabled: caregiverAlertsEnabled,
+        isArabic: isArabic,
+      );
+      await _schedulePendingEscalations(isArabic: isArabic);
       _status = LoadStatus.loaded;
     } catch (e) {
       _errorMessage = 'Could not load dose history.';
@@ -117,6 +130,12 @@ class AdherenceProvider extends ChangeNotifier {
     notifyListeners();
     final updated = _allDoses.firstWhere((d) => d.id == doseId);
     await _db.updateDose(patientId, updated);
+    await NotificationService().cancelDoseEscalation(updated);
+    await EscalationService().cancelDoseAutoMiss(updated);
+    await FirebaseBackendService().updateDoseStatus(
+      patientId: patientId,
+      dose: updated,
+    );
   }
 
   // ── FR5 + FR8: Confirm missed, return caregiver IDs to alert ─────────────
@@ -139,6 +158,12 @@ class AdherenceProvider extends ChangeNotifier {
     notifyListeners();
     final updated = _allDoses.firstWhere((d) => d.id == doseId);
     await _db.updateDose(patientId, updated);
+    await NotificationService().cancelDoseEscalation(updated);
+    await EscalationService().cancelDoseAutoMiss(updated);
+    await FirebaseBackendService().updateDoseStatus(
+      patientId: patientId,
+      dose: updated,
+    );
 
     if (!caregiverAlertsEnabled) return [];
     return alertableCaregivers.map((c) => c.id).toList();
@@ -168,6 +193,12 @@ class AdherenceProvider extends ChangeNotifier {
 
     for (final dose in missedDoses) {
       await _db.updateDose(patientId, dose);
+      await NotificationService().cancelDoseEscalation(dose);
+      await EscalationService().cancelDoseAutoMiss(dose);
+      await FirebaseBackendService().updateDoseStatus(
+        patientId: patientId,
+        dose: dose,
+      );
     }
     if (missedDoses.isNotEmpty) notifyListeners();
     return missedDoses;
@@ -182,8 +213,37 @@ class AdherenceProvider extends ChangeNotifier {
           c.permission == NotificationPermission.all)
       .toList();
 
-  bool _isOverdue(DoseConfirmation dose, DateTime now) =>
-      now.isAfter(_scheduledDateTime(dose).add(missedGracePeriod));
+  bool _isOverdue(DoseConfirmation dose, DateTime now) => now
+      .isAfter(_scheduledDateTime(dose).add(EscalationService.autoMissDelay));
+
+  Future<void> _mirrorPendingDoses({
+    required String patientId,
+    required String patientName,
+    required List<Caregiver> caregivers,
+    required bool caregiverAlertsEnabled,
+    required bool isArabic,
+  }) async {
+    for (final dose in _allDoses.where((dose) => dose.isPending)) {
+      await FirebaseBackendService().upsertDose(
+        patientId: patientId,
+        patientName: patientName,
+        dose: dose,
+        caregivers: caregivers,
+        caregiverAlertsEnabled: caregiverAlertsEnabled,
+        isArabic: isArabic,
+      );
+    }
+  }
+
+  Future<void> _schedulePendingEscalations({required bool isArabic}) async {
+    for (final dose in _allDoses.where((dose) => dose.isPending)) {
+      await NotificationService().scheduleDoseEscalation(
+        dose,
+        isArabic: isArabic,
+      );
+      await EscalationService().scheduleDoseAutoMiss(dose);
+    }
+  }
 
   DateTime _scheduledDateTime(DoseConfirmation dose) {
     final parts = dose.scheduledTime.split(':');

@@ -9,6 +9,7 @@ class DoseConfirmation {
   final DateTime? confirmedAt;
   final DoseStatus status;
   final bool caregiverNotified;
+  final bool secondReminderSent;
 
   const DoseConfirmation({
     required this.id,
@@ -19,6 +20,7 @@ class DoseConfirmation {
     this.confirmedAt,
     required this.status,
     this.caregiverNotified = false,
+    this.secondReminderSent = false,
   });
 
   bool isOnDate(DateTime date) =>
@@ -39,6 +41,7 @@ class DoseConfirmation {
         'confirmedAt': confirmedAt?.toIso8601String(),
         'status': status.name,
         'caregiverNotified': caregiverNotified,
+        'secondReminderSent': secondReminderSent,
       };
 
   factory DoseConfirmation.fromMap(Map<String, dynamic> m) => DoseConfirmation(
@@ -51,12 +54,14 @@ class DoseConfirmation {
             m['confirmedAt'] != null ? DateTime.parse(m['confirmedAt']) : null,
         status: DoseStatus.values.byName(m['status']),
         caregiverNotified: m['caregiverNotified'] ?? false,
+        secondReminderSent: m['secondReminderSent'] ?? false,
       );
 
   DoseConfirmation copyWith({
     DoseStatus? status,
     DateTime? confirmedAt,
     bool? caregiverNotified,
+    bool? secondReminderSent,
   }) =>
       DoseConfirmation(
         id: id,
@@ -67,5 +72,6 @@ class DoseConfirmation {
         confirmedAt: confirmedAt ?? this.confirmedAt,
         status: status ?? this.status,
         caregiverNotified: caregiverNotified ?? this.caregiverNotified,
+        secondReminderSent: secondReminderSent ?? this.secondReminderSent,
       );
 }

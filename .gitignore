@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local worker secrets
+external-worker/.env
+external-worker/*.json
+external-worker/secrets/

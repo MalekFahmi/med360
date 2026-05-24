@@ -25,7 +25,7 @@ class LocalDbService {
       databaseFactory = databaseFactoryFfiWeb;
       return openDatabase(
         'med360.db',
-        version: 2,
+        version: 3,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
         onOpen: _ensureCaregiverEmailColumn,
@@ -34,7 +34,7 @@ class LocalDbService {
     final path = join(await getDatabasesPath(), 'med360.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _ensureCaregiverEmailColumn,
@@ -44,6 +44,9 @@ class LocalDbService {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _ensureCaregiverEmailColumn(db);
+    }
+    if (oldVersion < 3) {
+      await _ensureDoseEscalationColumns(db);
     }
   }
 
@@ -56,6 +59,21 @@ class LocalDbService {
     final hasEmail = columns.any((column) => column['name'] == 'email');
     if (!hasEmail) {
       await db.execute('ALTER TABLE caregivers ADD COLUMN email TEXT');
+    }
+  }
+
+  Future<void> _ensureDoseEscalationColumns(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dose_confirmations'",
+    );
+    if (tables.isEmpty) return;
+    final columns = await db.rawQuery('PRAGMA table_info(dose_confirmations)');
+    final hasSecondReminder =
+        columns.any((column) => column['name'] == 'secondReminderSent');
+    if (!hasSecondReminder) {
+      await db.execute(
+        'ALTER TABLE dose_confirmations ADD COLUMN secondReminderSent INTEGER DEFAULT 0',
+      );
     }
   }
 
@@ -124,6 +142,7 @@ class LocalDbService {
         confirmedAt TEXT,
         status TEXT NOT NULL,
         caregiverNotified INTEGER DEFAULT 0,
+        secondReminderSent INTEGER DEFAULT 0,
         FOREIGN KEY (patientId) REFERENCES patients (id)
       )
     ''');
@@ -346,6 +365,7 @@ class LocalDbService {
           'confirmedAt': dose.confirmedAt?.toIso8601String(),
           'status': dose.status.name,
           'caregiverNotified': dose.caregiverNotified ? 1 : 0,
+          'secondReminderSent': dose.secondReminderSent ? 1 : 0,
         },
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -371,6 +391,7 @@ class LocalDbService {
                   : null,
               status: DoseStatus.values.byName(r['status'] as String),
               caregiverNotified: r['caregiverNotified'] == 1,
+              secondReminderSent: r['secondReminderSent'] == 1,
             ))
         .toList();
   }

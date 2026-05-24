@@ -34,7 +34,34 @@ class NotificationService {
     );
 
     await _plugin.initialize(settings: initSettings);
+    await _createAndroidChannels();
     _initialized = true;
+  }
+
+  Future<void> _createAndroidChannels() async {
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return;
+    await android.createNotificationChannel(const AndroidNotificationChannel(
+      'med360_reminders',
+      'Medication Reminders',
+      description: 'Notifications for medication schedules',
+      importance: Importance.max,
+    ));
+    await android.createNotificationChannel(const AndroidNotificationChannel(
+      'med360_alarms',
+      'Medication Alarms',
+      description: 'Alarm-style reminders for medication schedules',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+    ));
+    await android.createNotificationChannel(const AndroidNotificationChannel(
+      'med360_caregiver_alerts',
+      'Caregiver Alerts',
+      description: 'Alerts sent when a patient misses a dose',
+      importance: Importance.max,
+    ));
   }
 
   Future<void> requestPermissions() async {
@@ -70,14 +97,14 @@ class NotificationService {
     await cancelMedicationReminders(med);
 
     for (final time in med.reminderTimes) {
-      final id = _notificationId(med.id, time);
+      final id = _notificationId(med.id, time, 'initial');
       final isAlarm = med.reminderType == ReminderType.alarm;
 
       await _plugin.zonedSchedule(
         id: id,
-        title: isArabic ? 'تذكير بالدواء' : 'Medication Reminder',
+        title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø¨Ø§Ù„Ø¯ÙˆØ§Ø¡' : 'Medication Reminder',
         body: isArabic
-            ? 'حان وقت تناول ${med.nameAr} (${med.dosage})'
+            ? 'Ø­Ø§Ù† ÙˆÙ‚Øª ØªÙ†Ø§ÙˆÙ„ ${med.nameAr} (${med.dosage})'
             : 'Time to take ${med.name} (${med.dosage})',
         scheduledDate: _nextInstanceOfTime(time.hour, time.minute),
         notificationDetails: NotificationDetails(
@@ -109,6 +136,45 @@ class NotificationService {
     }
   }
 
+  Future<void> scheduleDoseEscalation(
+    DoseConfirmation dose, {
+    required bool isArabic,
+  }) async {
+    if (kIsWeb || !dose.isPending) return;
+
+    final secondReminderAt =
+        _scheduledDateTime(dose).add(const Duration(minutes: 5));
+    if (!secondReminderAt.isAfter(DateTime.now())) return;
+
+    await _plugin.zonedSchedule(
+      id: _doseNotificationId(dose.id, 'second'),
+      title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø«Ø§Ù†' : 'Second Medication Reminder',
+      body: isArabic
+          ? 'Ù„Ù… ÙŠØªÙ… ØªØ£ÙƒÙŠØ¯ Ø¬Ø±Ø¹Ø© ${dose.medicationName} Ø¨Ø¹Ø¯.'
+          : '${dose.medicationName} has not been marked as taken yet.',
+      scheduledDate: tz.TZDateTime.from(secondReminderAt, tz.local),
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'med360_reminders',
+          'Medication Reminders',
+          channelDescription: 'Notifications for medication schedules',
+          category: AndroidNotificationCategory.reminder,
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+          presentBadge: true,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: '${dose.id}:second',
+    );
+  }
+
   Future<void> showCaregiverAlert({
     required String medicationName,
     required String patientName,
@@ -118,9 +184,9 @@ class NotificationService {
 
     await _plugin.show(
       id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      title: isArabic ? 'تنبيه جرعة فائتة' : 'Missed dose alert',
+      title: isArabic ? 'ØªÙ†Ø¨ÙŠÙ‡ Ø¬Ø±Ø¹Ø© ÙØ§Ø¦ØªØ©' : 'Missed dose alert',
       body: isArabic
-          ? 'فاتت جرعة $medicationName للمريض $patientName'
+          ? 'ÙØ§ØªØª Ø¬Ø±Ø¹Ø© $medicationName Ù„Ù„Ù…Ø±ÙŠØ¶ $patientName'
           : '$patientName missed $medicationName',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -143,12 +209,20 @@ class NotificationService {
     if (kIsWeb) return;
 
     for (final time in med.reminderTimes) {
-      await _plugin.cancel(id: _notificationId(med.id, time));
+      await _plugin.cancel(id: _notificationId(med.id, time, 'initial'));
     }
   }
 
-  int _notificationId(String medicationId, ReminderTime time) =>
-      '$medicationId-${time.hour}-${time.minute}'.hashCode.abs();
+  Future<void> cancelDoseEscalation(DoseConfirmation dose) async {
+    if (kIsWeb) return;
+    await _plugin.cancel(id: _doseNotificationId(dose.id, 'second'));
+  }
+
+  int _notificationId(String medicationId, ReminderTime time, String stage) =>
+      '$medicationId-${time.hour}-${time.minute}-$stage'.hashCode.abs();
+
+  int _doseNotificationId(String doseId, String stage) =>
+      '$doseId-$stage'.hashCode.abs();
 
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);
@@ -164,5 +238,18 @@ class NotificationService {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
+  }
+
+  DateTime _scheduledDateTime(DoseConfirmation dose) {
+    final parts = dose.scheduledTime.split(':');
+    final hour = int.tryParse(parts.first) ?? 0;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return DateTime(
+      dose.scheduledDate.year,
+      dose.scheduledDate.month,
+      dose.scheduledDate.day,
+      hour,
+      minute,
+    );
   }
 }
