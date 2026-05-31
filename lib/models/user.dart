@@ -77,6 +77,42 @@ class CaregiverUser {
       );
 }
 
+class DoctorUser {
+  final String uid;
+  final String name;
+  final String email;
+  final String phone;
+  final String specialty;
+  final String? licenseNumber;
+
+  const DoctorUser({
+    required this.uid,
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.specialty,
+    this.licenseNumber,
+  });
+
+  factory DoctorUser.fromMap(Map<String, dynamic> m) => DoctorUser(
+        uid: m['uid'] ?? '',
+        name: m['name'] ?? '',
+        email: m['email'] ?? '',
+        phone: m['phone'] ?? '',
+        specialty: m['specialty'] ?? '',
+        licenseNumber: m['licenseNumber'],
+      );
+
+  Map<String, dynamic> toMap() => {
+        'uid': uid,
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'specialty': specialty,
+        'licenseNumber': licenseNumber,
+      };
+}
+
 class PatientUser {
   final String id;
   final String name;
@@ -99,7 +135,7 @@ class PatientUser {
     this.dateOfBirth,
     this.chronicCondition,
     required this.caregivers,
-    this.arabicMode = false,
+    this.arabicMode = true,
     this.largeFonts = false,
     this.highContrast = false,
     this.caregiverAlertsEnabled = true,

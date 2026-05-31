@@ -6,7 +6,7 @@ import '../services/local_db_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
-enum AccountRole { patient, caregiver }
+enum AccountRole { patient, caregiver, doctor }
 
 class AuthProvider extends ChangeNotifier {
   final LocalDbService _db;
@@ -16,19 +16,24 @@ class AuthProvider extends ChangeNotifier {
   AuthStatus _status = AuthStatus.initial;
   PatientUser? _patient;
   CaregiverUser? _caregiver;
+  DoctorUser? _doctor;
+  List<DoctorUser> _linkedDoctors = [];
   AccountRole? _role;
   String? _errorMessage;
 
   AuthStatus get status => _status;
   PatientUser? get patient => _patient;
   CaregiverUser? get caregiver => _caregiver;
+  DoctorUser? get doctor => _doctor;
+  List<DoctorUser> get linkedDoctors => _linkedDoctors;
   AccountRole? get role => _role;
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _status == AuthStatus.authenticated;
   bool get isLoading => _status == AuthStatus.loading;
   bool get isCaregiver => _role == AccountRole.caregiver;
+  bool get isDoctor => _role == AccountRole.doctor;
 
-  bool get arabicMode => _patient?.arabicMode ?? false;
+  bool get arabicMode => _patient?.arabicMode ?? true;
   bool get largeFonts => _patient?.largeFonts ?? false;
   bool get highContrast => _patient?.highContrast ?? false;
   bool get caregiverAlertsEnabled => _patient?.caregiverAlertsEnabled ?? true;
@@ -40,6 +45,15 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final backend = FirebaseBackendService();
+      final doctor = await backend.currentDoctor();
+      if (doctor != null) {
+        _doctor = doctor;
+        _role = AccountRole.doctor;
+        _status = AuthStatus.authenticated;
+        notifyListeners();
+        return;
+      }
+
       final caregiver = await backend.currentCaregiver();
       if (caregiver != null) {
         _caregiver = caregiver;
@@ -56,8 +70,10 @@ class AuthProvider extends ChangeNotifier {
         if (localPatient == null) {
           await _db.insertPatient(patient);
         }
+        _linkedDoctors = await backend.fetchDoctorsForCurrentPatient();
         _patient = patient;
         _caregiver = null;
+        _doctor = null;
         _role = AccountRole.patient;
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('loggedInPatientId', patient.id);
@@ -134,6 +150,7 @@ class AuthProvider extends ChangeNotifier {
       await FirebaseBackendService().registerPatientDevice(newPatient);
       _patient = newPatient;
       _caregiver = null;
+      _doctor = null;
       _role = AccountRole.patient;
 
       final prefs = await SharedPreferences.getInstance();
@@ -192,8 +209,10 @@ class AuthProvider extends ChangeNotifier {
       p = cloudPatient ?? p;
       await _db.insertPatient(p);
       await backend.registerPatientDevice(p);
+      _linkedDoctors = await backend.fetchDoctorsForCurrentPatient();
       _patient = p;
       _caregiver = null;
+      _doctor = null;
       _role = AccountRole.patient;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', p.id);
@@ -217,6 +236,8 @@ class AuthProvider extends ChangeNotifier {
     await FirebaseBackendService().logoutFirebaseUser();
     _patient = null;
     _caregiver = null;
+    _doctor = null;
+    _linkedDoctors = [];
     _role = null;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
@@ -248,6 +269,8 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('loggedInPatientId');
       _patient = null;
+      _linkedDoctors = [];
+      _doctor = null;
       _role = AccountRole.caregiver;
       _status = AuthStatus.authenticated;
       notifyListeners();
@@ -276,7 +299,83 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('loggedInPatientId');
       _patient = null;
+      _linkedDoctors = [];
+      _doctor = null;
       _role = AccountRole.caregiver;
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> registerDoctor({
+    required String name,
+    required String email,
+    required String password,
+    required String phone,
+    required String specialty,
+    String? licenseNumber,
+  }) async {
+    _errorMessage = null;
+    _status = AuthStatus.loading;
+    notifyListeners();
+
+    try {
+      if (password.length < 6) {
+        _errorMessage = 'Password must be at least 6 characters.';
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+        return false;
+      }
+      _doctor = await FirebaseBackendService().registerDoctor(
+        name: name,
+        email: email,
+        password: password,
+        phone: phone,
+        specialty: specialty,
+        licenseNumber: licenseNumber,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('loggedInPatientId');
+      _patient = null;
+      _caregiver = null;
+      _linkedDoctors = [];
+      _role = AccountRole.doctor;
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> loginDoctor({
+    required String email,
+    required String password,
+  }) async {
+    _errorMessage = null;
+    _status = AuthStatus.loading;
+    notifyListeners();
+
+    try {
+      _doctor = await FirebaseBackendService().loginDoctor(
+        email: email,
+        password: password,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('loggedInPatientId');
+      _patient = null;
+      _caregiver = null;
+      _linkedDoctors = [];
+      _role = AccountRole.doctor;
       _status = AuthStatus.authenticated;
       notifyListeners();
       return true;
@@ -382,6 +481,32 @@ class AuthProvider extends ChangeNotifier {
     final updated = _patient!.copyWith(caregivers: [...caregivers, cg]);
     _patient = updated;
     notifyListeners();
+  }
+
+  Future<bool> addDoctorByEmail(String email) async {
+    if (_patient == null) return false;
+    try {
+      final doctor = await FirebaseBackendService().findDoctorByEmail(email);
+      if (doctor == null) {
+        _errorMessage = 'No registered doctor was found for that email.';
+        notifyListeners();
+        return false;
+      }
+      await FirebaseBackendService().linkDoctorToCurrentPatient(
+        patientId: _patient!.id,
+        doctor: doctor,
+      );
+      _linkedDoctors = [
+        ..._linkedDoctors.where((d) => d.uid != doctor.uid),
+        doctor,
+      ];
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Could not link doctor. Please try again.';
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<void> removeCaregiver(String caregiverId) async {

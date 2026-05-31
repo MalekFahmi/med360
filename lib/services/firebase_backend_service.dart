@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
 import '../firebase_options.dart';
@@ -24,6 +25,7 @@ class FirebaseBackendService {
   FirebaseFirestore? _firestore;
   FirebaseAuth? _auth;
   FirebaseMessaging? _messaging;
+  FirebaseStorage? _storage;
   StreamSubscription<String>? _tokenRefreshSubscription;
   bool _initialized = false;
   bool _enabled = false;
@@ -61,6 +63,7 @@ class FirebaseBackendService {
       );
       _firestore = FirebaseFirestore.instance;
       _auth = FirebaseAuth.instance;
+      _storage = FirebaseStorage.instance;
       _enabled = true;
       await testFirestoreConnectivity();
       await _initMessaging();
@@ -121,6 +124,18 @@ class FirebaseBackendService {
     if (data == null || data['role'] != 'caregiver') return null;
     await registerCaregiverDevice();
     return CaregiverUser.fromMap(data);
+  }
+
+  Future<DoctorUser?> currentDoctor() async {
+    if (!_enabled || _auth?.currentUser == null || _firestore == null) {
+      return null;
+    }
+    final uid = _auth!.currentUser!.uid;
+    final doc = await _firestore!.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data == null || data['role'] != 'doctor') return null;
+    await registerDoctorDevice();
+    return DoctorUser.fromMap(data);
   }
 
   Future<PatientUser?> currentPatient({String passwordHash = ''}) async {
@@ -398,6 +413,79 @@ class FirebaseBackendService {
     return CaregiverUser.fromMap(data);
   }
 
+  Future<DoctorUser> registerDoctor({
+    required String name,
+    required String email,
+    required String password,
+    required String phone,
+    required String specialty,
+    String? licenseNumber,
+  }) async {
+    if (!_enabled || _auth == null || _firestore == null) {
+      throw StateError('Firebase is not initialized.');
+    }
+    final credential = await _auth!.createUserWithEmailAndPassword(
+      email: email.trim().toLowerCase(),
+      password: password,
+    );
+    final uid = credential.user!.uid;
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedPhone = normalizePhone(phone);
+    final doctor = DoctorUser(
+      uid: uid,
+      name: name.trim(),
+      email: normalizedEmail,
+      phone: phone.trim(),
+      specialty: specialty.trim(),
+      licenseNumber:
+          licenseNumber?.trim().isEmpty == true ? null : licenseNumber?.trim(),
+    );
+    await _firestore!.collection('users').doc(uid).set({
+      ...doctor.toMap(),
+      'role': 'doctor',
+      'phoneNormalized': normalizedPhone,
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastSeen': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _writeDoctorDirectory(doctor);
+    await registerDoctorDevice();
+    return doctor;
+  }
+
+  Future<DoctorUser> loginDoctor({
+    required String email,
+    required String password,
+  }) async {
+    if (!_enabled || _auth == null || _firestore == null) {
+      throw StateError('Firebase is not initialized.');
+    }
+    final credential = await _auth!.signInWithEmailAndPassword(
+      email: email.trim().toLowerCase(),
+      password: password,
+    );
+    final uid = credential.user!.uid;
+    final doc = await _firestore!.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data == null || data['role'] != 'doctor') {
+      await _auth!.signOut();
+      throw StateError('This account is not registered as a doctor.');
+    }
+    final doctor = DoctorUser.fromMap(data);
+    await _writeDoctorDirectory(doctor);
+    await registerDoctorDevice();
+    return doctor;
+  }
+
+  Future<void> _writeDoctorDirectory(DoctorUser doctor) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!.collection('doctorDirectory').doc(doctor.uid).set({
+      ...doctor.toMap(),
+      'role': 'doctor',
+      'phoneNormalized': normalizePhone(doctor.phone),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Future<void> _writeCaregiverDirectory({
     required String uid,
     required String name,
@@ -459,6 +547,47 @@ class FirebaseBackendService {
     await registerUserDevice(
       firebaseUid: uid,
       role: 'caregiver',
+      token: token,
+    );
+  }
+
+  Future<void> registerDoctorDevice() async {
+    if (!_enabled ||
+        !_messagingEnabled ||
+        _firestore == null ||
+        _auth == null ||
+        _messaging == null) {
+      return;
+    }
+    final doctorUid = _auth!.currentUser?.uid;
+    if (doctorUid == null) return;
+    try {
+      await _messaging!
+          .requestPermission(alert: true, badge: true, sound: true);
+      final token = await _messaging!.getToken();
+      if (token != null) {
+        await _writeDoctorToken(token);
+      }
+      await _tokenRefreshSubscription?.cancel();
+      _tokenRefreshSubscription = _messaging!.onTokenRefresh
+          .listen((newToken) => _writeDoctorToken(newToken));
+    } catch (e) {
+      debugPrint('Doctor FCM token registration skipped: $e');
+    }
+  }
+
+  Future<void> _writeDoctorToken(String token) async {
+    final uid = _auth?.currentUser?.uid;
+    if (!_enabled || _firestore == null || uid == null) return;
+    await _firestore!.collection('users').doc(uid).set({
+      'role': 'doctor',
+      'fcmToken': token,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'lastSeen': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await registerUserDevice(
+      firebaseUid: uid,
+      role: 'doctor',
       token: token,
     );
   }
@@ -528,6 +657,136 @@ class FirebaseBackendService {
       relationship: 'Caregiver',
       permission: NotificationPermission.missedDoseOnly,
     );
+  }
+
+  Future<DoctorUser?> findDoctorByEmail(String email) async {
+    if (!_enabled || _firestore == null) return null;
+    final normalizedEmail = email.trim().toLowerCase();
+    final snap = await _firestore!
+        .collection('doctorDirectory')
+        .where('email', isEqualTo: normalizedEmail)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return DoctorUser.fromMap(snap.docs.first.data());
+  }
+
+  Future<List<DoctorUser>> fetchDoctorsForCurrentPatient() async {
+    final patientUid = currentUid;
+    if (!_enabled || _firestore == null || patientUid == null) return const [];
+    final snap = await _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('doctors')
+        .get();
+    return snap.docs
+        .map((doc) => DoctorUser(
+              uid: doc.data()['doctorId'] ?? doc.id,
+              name: doc.data()['name'] ?? '',
+              email: doc.data()['email'] ?? '',
+              phone: doc.data()['phone'] ?? '',
+              specialty: doc.data()['specialty'] ?? '',
+              licenseNumber: doc.data()['licenseNumber'],
+            ))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAssignedPatientsForDoctor(
+      String doctorUid) async {
+    if (!_enabled || _firestore == null) return const [];
+    final relations = await _firestore!
+        .collection('patientDoctorRelations')
+        .where('doctorId', isEqualTo: doctorUid)
+        .get();
+    final patients = <Map<String, dynamic>>[];
+    for (final relation in relations.docs) {
+      final patientUid = relation.data()['patientUid'] as String?;
+      if (patientUid == null) continue;
+      final patientDoc =
+          await _firestore!.collection('patients').doc(patientUid).get();
+      final data = patientDoc.data() ?? {};
+      patients.add({
+        'patientUid': patientUid,
+        'patientId': relation.data()['patientId'],
+        'name': data['name'] ?? 'Patient',
+        'phone': data['phone'] ?? '',
+        'linkedAt': relation.data()['linkedAt'],
+      });
+    }
+    return patients;
+  }
+
+  Future<Map<String, dynamic>?> createManagedPatientForCaregiver({
+    required String name,
+    required String phone,
+    String? chronicCondition,
+  }) async {
+    final caregiverUid = currentUid;
+    if (!_enabled || _firestore == null || caregiverUid == null) return null;
+    final patientId = 'PAT-${DateTime.now().millisecondsSinceEpoch}';
+    final patientUid = 'managed_${caregiverUid}_$patientId';
+    final normalizedPhone = normalizePhone(phone);
+
+    await _firestore!.collection('patients').doc(patientUid).set({
+      'uid': patientUid,
+      'patientId': patientId,
+      'ownerUid': caregiverUid,
+      'managedByCaregiver': true,
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'phoneNormalized': normalizedPhone,
+      'chronicCondition': chronicCondition,
+      'arabicMode': true,
+      'caregiverAlertsEnabled': true,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _firestore!
+        .collection('patientCaregivers')
+        .doc('${patientUid}_$caregiverUid')
+        .set({
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'caregiverUid': caregiverUid,
+      'linkedAt': FieldValue.serverTimestamp(),
+      'managedByCaregiver': true,
+    }, SetOptions(merge: true));
+
+    return {
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'name': name.trim(),
+      'phone': phone.trim(),
+    };
+  }
+
+  Future<bool> linkExistingPatientToCurrentCaregiverByPhone(
+      String phone) async {
+    final caregiverUid = currentUid;
+    if (!_enabled || _firestore == null || caregiverUid == null) return false;
+    final normalizedPhone = normalizePhone(phone);
+    final users = await _firestore!
+        .collection('users')
+        .where('role', isEqualTo: 'patient')
+        .where('phoneNormalized', isEqualTo: normalizedPhone)
+        .limit(1)
+        .get();
+    if (users.docs.isEmpty) return false;
+    final userDoc = users.docs.first;
+    final patientUid = userDoc.id;
+    final patientId = userDoc.data()['patientId'] as String?;
+    if (patientId == null) return false;
+    await _firestore!
+        .collection('patientCaregivers')
+        .doc('${patientUid}_$caregiverUid')
+        .set({
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'caregiverUid': caregiverUid,
+      'linkedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return true;
   }
 
   String normalizePhone(String phone) =>
@@ -691,6 +950,40 @@ class FirebaseBackendService {
     }, SetOptions(merge: true));
   }
 
+  Future<void> linkDoctorToCurrentPatient({
+    required String patientId,
+    required DoctorUser doctor,
+  }) async {
+    final patientUid = currentUid;
+    if (!_enabled || _firestore == null || patientUid == null) return;
+
+    await _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('doctors')
+        .doc(doctor.uid)
+        .set({
+      'doctorId': doctor.uid,
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'name': doctor.name,
+      'email': doctor.email,
+      'phone': doctor.phone,
+      'specialty': doctor.specialty,
+      'linkedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _firestore!
+        .collection('patientDoctorRelations')
+        .doc('${patientUid}_${doctor.uid}')
+        .set({
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'doctorId': doctor.uid,
+      'linkedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Future<void> removeCaregiver({
     required String patientId,
     required String caregiverId,
@@ -753,6 +1046,95 @@ class FirebaseBackendService {
     await batch.commit();
   }
 
+  Future<void> sendRefillAlert({
+    required String patientId,
+    required Medication medication,
+    int? milestone,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    final patientUid = await _patientUidForPatientId(patientId);
+    if (patientUid == null) return;
+    final patientDoc =
+        await _firestore!.collection('patients').doc(patientUid).get();
+    final patientName = patientDoc.data()?['name'] ?? 'Patient';
+    final notificationId =
+        'REFILL-${medication.id}-${DateTime.now().millisecondsSinceEpoch}';
+    final payload = {
+      'id': notificationId,
+      'patientId': patientId,
+      'patientUid': patientUid,
+      'patientName': patientName,
+      'medicationId': medication.id,
+      'medicationName': medication.name,
+      'title': 'Refill reminder',
+      'body':
+          '$patientName has ${medication.estimatedDaysRemaining.toStringAsFixed(1)} days of ${medication.name} remaining.',
+      'type': 'refillAlert',
+      'daysRemaining': medication.estimatedDaysRemaining,
+      if (milestone != null) 'milestone': milestone,
+      'quantityRemaining': medication.quantityRemaining,
+      'sentAt': FieldValue.serverTimestamp(),
+      'acknowledged': false,
+    };
+
+    final batch = _firestore!.batch();
+    final caregivers = await _firestore!
+        .collection('patientCaregivers')
+        .where('patientUid', isEqualTo: patientUid)
+        .get();
+    for (final relation in caregivers.docs) {
+      final caregiverUid = relation.data()['caregiverUid'] as String?;
+      if (caregiverUid == null) continue;
+      batch.set(
+        _firestore!
+            .collection('caregiverInboxes')
+            .doc(caregiverUid)
+            .collection('notifications')
+            .doc(notificationId),
+        {...payload, 'recipientId': caregiverUid},
+        SetOptions(merge: true),
+      );
+    }
+
+    final doctors = await _firestore!
+        .collection('patientDoctorRelations')
+        .where('patientUid', isEqualTo: patientUid)
+        .get();
+    for (final relation in doctors.docs) {
+      final doctorUid = relation.data()['doctorId'] as String?;
+      if (doctorUid == null) continue;
+      batch.set(
+        _firestore!
+            .collection('doctorInboxes')
+            .doc(doctorUid)
+            .collection('notifications')
+            .doc(notificationId),
+        {...payload, 'recipientId': doctorUid},
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> logRefillCompletion({
+    required String patientId,
+    required Medication medication,
+  }) async {
+    await logReminderEvent(
+      patientId: patientId,
+      medicationId: medication.id,
+      eventType: 'refillCompleted',
+      source: 'patient',
+      details: {
+        'quantityRemaining': medication.quantityRemaining,
+        'dosesPerDay': medication.dosesPerDay,
+        'estimatedDaysRemaining': medication.estimatedDaysRemaining,
+        'completedAt': DateTime.now().toIso8601String(),
+      },
+    );
+  }
+
   Future<void> upsertDose({
     required String patientId,
     required String patientName,
@@ -799,6 +1181,357 @@ class FirebaseBackendService {
       'secondReminderSent': dose.secondReminderSent,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await logAdherenceEvent(
+      patientId: patientId,
+      medicationId: dose.medicationId,
+      eventType: dose.status.name,
+      source: 'app',
+      details: {
+        'doseId': dose.id,
+        'scheduledTime': dose.scheduledTime,
+      },
+    );
+  }
+
+  Future<void> logAdherenceEvent({
+    required String patientId,
+    String? medicationId,
+    required String eventType,
+    required String source,
+    Map<String, dynamic>? details,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!.collection('adherenceEvents').add({
+      'patientId': patientId,
+      if (medicationId != null) 'medicationId': medicationId,
+      'eventType': eventType,
+      'source': source,
+      'details': details ?? const {},
+      'timestamp': FieldValue.serverTimestamp(),
+      'actorUid': currentUid,
+    });
+  }
+
+  Future<String?> _currentUserRole() async {
+    if (!_enabled || _firestore == null) return null;
+    final uid = currentUid;
+    if (uid == null) return null;
+    final doc = await _firestore!.collection('users').doc(uid).get();
+    return doc.data()?['role'] as String?;
+  }
+
+  Future<void> logReminderEvent({
+    required String patientId,
+    required String medicationId,
+    required String eventType,
+    required String source,
+    Map<String, dynamic>? details,
+  }) async {
+    await logAdherenceEvent(
+      patientId: patientId,
+      medicationId: medicationId,
+      eventType: eventType,
+      source: source,
+      details: details,
+    );
+  }
+
+  Future<void> logMedicationModification({
+    required String patientId,
+    required Medication medication,
+    required String action,
+    required String actorRole,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!.collection('medicationChangeLogs').add({
+      'patientId': patientId,
+      'medicationId': medication.id,
+      'medicationName': medication.name,
+      'action': action,
+      'actorRole': actorRole,
+      'actorUid': currentUid,
+      'timestamp': FieldValue.serverTimestamp(),
+      'quantityRemaining': medication.quantityRemaining,
+      'dosesPerDay': medication.dosesPerDay,
+      'refillThreshold': medication.refillThreshold,
+    });
+    final interventionEventType = switch (actorRole) {
+      'caregiver' => 'caregiverMedicationIntervention',
+      'doctor' => 'doctorMedicationIntervention',
+      _ => null,
+    };
+    if (interventionEventType != null) {
+      await logAdherenceEvent(
+        patientId: patientId,
+        medicationId: medication.id,
+        eventType: interventionEventType,
+        source: actorRole,
+        details: {
+          'action': action,
+          'medicationName': medication.name,
+          'quantityRemaining': medication.quantityRemaining,
+          'dosesPerDay': medication.dosesPerDay,
+          'refillThreshold': medication.refillThreshold,
+        },
+      );
+    }
+  }
+
+  Future<void> upsertPatientMedication({
+    required String patientUid,
+    required String patientId,
+    required Medication medication,
+    required String actorRole,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('medications')
+        .doc(medication.id)
+        .set({
+      ...medication.toMap(),
+      'patientId': patientId,
+      'patientUid': patientUid,
+      'actorRole': actorRole,
+      'actorUid': currentUid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await logMedicationModification(
+      patientId: patientId,
+      medication: medication,
+      action: 'upserted',
+      actorRole: actorRole,
+    );
+  }
+
+  Future<List<Medication>> fetchPatientMedications(String patientUid) async {
+    if (!_enabled || _firestore == null) return const [];
+    final snap = await _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('medications')
+        .get();
+    return snap.docs.map((doc) => Medication.fromMap(doc.data())).toList();
+  }
+
+  Future<void> shareReport({
+    required String patientId,
+    required String patientName,
+    required String recipientRole,
+    required String recipientId,
+    required String reportType,
+    required Map<String, dynamic> report,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!.collection('sharedReports').add({
+      'patientId': patientId,
+      'patientName': patientName,
+      'recipientRole': recipientRole,
+      'recipientId': recipientId,
+      'reportType': reportType,
+      'report': report,
+      'actorUid': currentUid,
+      'archived': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      'reviewedAt': null,
+    });
+    await logAdherenceEvent(
+      patientId: patientId,
+      eventType: 'reportShared',
+      source: 'patient',
+      details: {
+        'recipientRole': recipientRole,
+        'recipientId': recipientId,
+        'reportType': reportType,
+      },
+    );
+  }
+
+  Future<void> uploadPatientReport({
+    required String patientId,
+    required String patientName,
+    required String recipientRole,
+    required String recipientId,
+    required String fileName,
+    required Uint8List bytes,
+    String? contentType,
+  }) async {
+    if (!_enabled || _firestore == null || _storage == null) return;
+    final patientUid = currentUid;
+    if (patientUid == null) {
+      throw Exception('No authenticated Firebase user');
+    }
+
+    final sanitizedName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final storagePath =
+        'patientReports/$patientUid/${DateTime.now().millisecondsSinceEpoch}_$sanitizedName';
+    final ref = _storage!.ref(storagePath);
+    await ref.putData(
+      bytes,
+      SettableMetadata(
+        contentType: contentType ?? _contentTypeFor(fileName),
+        customMetadata: {
+          'patientId': patientId,
+          'patientUid': patientUid,
+          'recipientRole': recipientRole,
+          'recipientId': recipientId,
+        },
+      ),
+    );
+    final downloadUrl = await ref.getDownloadURL();
+
+    await _firestore!.collection('sharedReports').add({
+      'patientId': patientId,
+      'patientName': patientName,
+      'recipientRole': recipientRole,
+      'recipientId': recipientId,
+      'reportType': 'uploaded',
+      'report': {
+        'label': fileName,
+        'fileName': fileName,
+        'storagePath': storagePath,
+        'downloadUrl': downloadUrl,
+        'contentType': contentType ?? _contentTypeFor(fileName),
+        'sizeBytes': bytes.lengthInBytes,
+      },
+      'actorUid': patientUid,
+      'archived': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      'reviewedAt': null,
+    });
+
+    await logAdherenceEvent(
+      patientId: patientId,
+      eventType: 'patientReportUploaded',
+      source: 'patient',
+      details: {
+        'recipientRole': recipientRole,
+        'recipientId': recipientId,
+        'fileName': fileName,
+        'storagePath': storagePath,
+        'sizeBytes': bytes.lengthInBytes,
+      },
+    );
+  }
+
+  Future<void> logUserEngagementEvent({
+    String? patientId,
+    required String eventType,
+    required String source,
+    Map<String, dynamic>? details,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    final role = await _currentUserRole();
+    await _firestore!.collection('adherenceEvents').add({
+      if (patientId != null) 'patientId': patientId,
+      'eventType': eventType,
+      'source': source,
+      'eventCategory': 'userEngagement',
+      'details': {
+        if (role != null) 'actorRole': role,
+        ...?details,
+      },
+      'timestamp': FieldValue.serverTimestamp(),
+      'actorUid': currentUid,
+    });
+  }
+
+  String _contentTypeFor(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lower.endsWith('.doc')) return 'application/msword';
+    if (lower.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    return 'application/octet-stream';
+  }
+
+  Future<List<Map<String, dynamic>>> fetchSharedReportsForRecipient({
+    required String recipientId,
+    String? recipientRole,
+  }) async {
+    if (!_enabled || _firestore == null) return const [];
+    Query<Map<String, dynamic>> query = _firestore!
+        .collection('sharedReports')
+        .where('recipientId', isEqualTo: recipientId);
+    if (recipientRole != null) {
+      query = query.where('recipientRole', isEqualTo: recipientRole);
+    }
+    final snap = await query.orderBy('createdAt', descending: true).get();
+    return snap.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchDoctorInbox(String doctorUid) async {
+    if (!_enabled || _firestore == null) return const [];
+    final snap = await _firestore!
+        .collection('doctorInboxes')
+        .doc(doctorUid)
+        .collection('notifications')
+        .orderBy('sentAt', descending: true)
+        .limit(20)
+        .get();
+    return snap.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+  }
+
+  Future<void> markReportReviewed(String reportId) async {
+    if (!_enabled || _firestore == null) return;
+    final reportDoc =
+        await _firestore!.collection('sharedReports').doc(reportId).get();
+    final report = reportDoc.data();
+    await _firestore!.collection('sharedReports').doc(reportId).set({
+      'reviewedAt': FieldValue.serverTimestamp(),
+      'archived': false,
+    }, SetOptions(merge: true));
+    if (report != null) {
+      final role =
+          await _currentUserRole() ?? report['recipientRole'] ?? 'user';
+      await logAdherenceEvent(
+        patientId: report['patientId'] ?? '',
+        eventType: role == 'doctor'
+            ? 'doctorReportReviewed'
+            : role == 'caregiver'
+                ? 'caregiverReportReviewed'
+                : 'reportReviewed',
+        source: role,
+        details: {
+          'reportId': reportId,
+          'reportType': report['reportType'],
+        },
+      );
+    }
+  }
+
+  Future<void> archiveReport(String reportId) async {
+    if (!_enabled || _firestore == null) return;
+    final reportDoc =
+        await _firestore!.collection('sharedReports').doc(reportId).get();
+    final report = reportDoc.data();
+    await _firestore!.collection('sharedReports').doc(reportId).set({
+      'archived': true,
+      'archivedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    if (report != null) {
+      final role =
+          await _currentUserRole() ?? report['recipientRole'] ?? 'user';
+      await logAdherenceEvent(
+        patientId: report['patientId'] ?? '',
+        eventType: role == 'doctor'
+            ? 'doctorReportArchived'
+            : role == 'caregiver'
+                ? 'caregiverReportArchived'
+                : 'reportArchived',
+        source: role,
+        details: {
+          'reportId': reportId,
+          'reportType': report['reportType'],
+        },
+      );
+    }
   }
 
   String _doseDocId(String patientUid, String doseId) =>

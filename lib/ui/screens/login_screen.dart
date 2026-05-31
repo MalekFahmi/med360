@@ -6,13 +6,13 @@ import '../../providers/providers.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onSignupTap;
-  final bool caregiverMode;
-  final ValueChanged<bool> onCaregiverModeChanged;
+  final AccountRole selectedRole;
+  final ValueChanged<AccountRole> onRoleChanged;
   const LoginScreen({
     super.key,
     required this.onSignupTap,
-    required this.caregiverMode,
-    required this.onCaregiverModeChanged,
+    required this.selectedRole,
+    required this.onRoleChanged,
   });
 
   @override
@@ -25,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
-  bool get _caregiverMode => widget.caregiverMode;
+  bool get _usesEmail => widget.selectedRole != AccountRole.patient;
 
   @override
   void dispose() {
@@ -38,15 +38,20 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthProvider>();
-    final ok = _caregiverMode
-        ? await auth.loginCaregiver(
-            email: _emailCtrl.text.trim(),
-            password: _passCtrl.text,
-          )
-        : await auth.login(
-            phone: _phoneCtrl.text.trim(),
-            password: _passCtrl.text,
-          );
+    final ok = switch (widget.selectedRole) {
+      AccountRole.patient => await auth.login(
+          phone: _phoneCtrl.text.trim(),
+          password: _passCtrl.text,
+        ),
+      AccountRole.caregiver => await auth.loginCaregiver(
+          email: _emailCtrl.text.trim(),
+          password: _passCtrl.text,
+        ),
+      AccountRole.doctor => await auth.loginDoctor(
+          email: _emailCtrl.text.trim(),
+          password: _passCtrl.text,
+        ),
+    };
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content:
@@ -92,23 +97,27 @@ class _LoginScreenState extends State<LoginScreen> {
                           style:
                               AppTextStyles.screenTitle.copyWith(fontSize: 18)),
                       const SizedBox(height: AppSpacing.lg),
-                      SegmentedButton<bool>(
+                      SegmentedButton<AccountRole>(
                         segments: const [
                           ButtonSegment(
-                              value: false,
+                              value: AccountRole.patient,
                               label: Text('Patient'),
                               icon: Icon(Icons.person_outline_rounded)),
                           ButtonSegment(
-                              value: true,
+                              value: AccountRole.caregiver,
                               label: Text('Caregiver'),
                               icon: Icon(Icons.health_and_safety_outlined)),
+                          ButtonSegment(
+                              value: AccountRole.doctor,
+                              label: Text('Doctor'),
+                              icon: Icon(Icons.local_hospital_outlined)),
                         ],
-                        selected: {_caregiverMode},
+                        selected: {widget.selectedRole},
                         onSelectionChanged: (value) =>
-                            widget.onCaregiverModeChanged(value.first),
+                            widget.onRoleChanged(value.first),
                       ),
                       const SizedBox(height: AppSpacing.md),
-                      if (_caregiverMode)
+                      if (_usesEmail)
                         TextFormField(
                           controller: _emailCtrl,
                           keyboardType: TextInputType.emailAddress,
@@ -193,11 +202,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   height: 20,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: AppColors.white))
-                              : Text(
-                                  _caregiverMode
-                                      ? 'Log in as caregiver'
-                                      : 'Log in',
-                                  style: const TextStyle(
+                              : const Text('Log in',
+                                  style: TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w600)),
                         ),

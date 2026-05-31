@@ -1,0 +1,21 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /patientReports/{patientUid}/{fileName} {
+      allow write: if signedIn()
+        && request.auth.uid == patientUid
+        && request.resource.size < 10 * 1024 * 1024;
+
+      allow read: if signedIn();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -25,7 +25,7 @@ class LocalDbService {
       databaseFactory = databaseFactoryFfiWeb;
       return openDatabase(
         'med360.db',
-        version: 3,
+        version: 4,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
         onOpen: _ensureSchema,
@@ -34,7 +34,7 @@ class LocalDbService {
     final path = join(await getDatabasesPath(), 'med360.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _ensureSchema,
@@ -48,6 +48,10 @@ class LocalDbService {
     if (oldVersion < 3) {
       await _ensureDoseEscalationColumns(db);
     }
+    if (oldVersion < 4) {
+      await _ensureMedicationInventoryColumns(db);
+      await _ensurePhaseTwoTables(db);
+    }
     await _ensureCaregiverNotificationPatientNameColumn(db);
   }
 
@@ -55,6 +59,8 @@ class LocalDbService {
     await _ensureCaregiverEmailColumn(db);
     await _ensureDoseEscalationColumns(db);
     await _ensureCaregiverNotificationPatientNameColumn(db);
+    await _ensureMedicationInventoryColumns(db);
+    await _ensurePhaseTwoTables(db);
   }
 
   Future<void> _ensureCaregiverEmailColumn(Database db) async {
@@ -99,6 +105,71 @@ class LocalDbService {
         "ALTER TABLE caregiver_notifications ADD COLUMN patientName TEXT DEFAULT ''",
       );
     }
+  }
+
+  Future<void> _ensureMedicationInventoryColumns(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'medications'",
+    );
+    if (tables.isEmpty) return;
+    final columns = await db.rawQuery('PRAGMA table_info(medications)');
+    Future<void> addColumn(String name, String definition) async {
+      if (!columns.any((column) => column['name'] == name)) {
+        await db.execute('ALTER TABLE medications ADD COLUMN $definition');
+      }
+    }
+
+    await addColumn('endDate', 'endDate TEXT');
+    await addColumn('quantityRemaining', 'quantityRemaining INTEGER DEFAULT 0');
+    await addColumn('dosesPerDay', 'dosesPerDay REAL DEFAULT 1');
+    await addColumn('refillThreshold', 'refillThreshold INTEGER DEFAULT 7');
+  }
+
+  Future<void> _ensurePhaseTwoTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS medication_change_logs (
+        id TEXT PRIMARY KEY,
+        patientId TEXT NOT NULL,
+        medicationId TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actorRole TEXT NOT NULL,
+        actorId TEXT,
+        changedAt TEXT NOT NULL,
+        details TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS refill_events (
+        id TEXT PRIMARY KEY,
+        patientId TEXT NOT NULL,
+        medicationId TEXT NOT NULL,
+        medicationName TEXT NOT NULL,
+        daysRemaining REAL NOT NULL,
+        threshold INTEGER NOT NULL,
+        milestone INTEGER,
+        createdAt TEXT NOT NULL,
+        completedAt TEXT
+      )
+    ''');
+    final columns = await db.rawQuery('PRAGMA table_info(refill_events)');
+    if (!columns.any((column) => column['name'] == 'milestone')) {
+      await db.execute(
+        'ALTER TABLE refill_events ADD COLUMN milestone INTEGER',
+      );
+    }
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS adherence_events (
+        id TEXT PRIMARY KEY,
+        patientId TEXT NOT NULL,
+        medicationId TEXT,
+        eventType TEXT NOT NULL,
+        source TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        details TEXT
+      )
+    ''');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -150,6 +221,10 @@ class LocalDbService {
         startDate TEXT NOT NULL,
         notes TEXT,
         notesAr TEXT,
+        endDate TEXT,
+        quantityRemaining INTEGER DEFAULT 0,
+        dosesPerDay REAL DEFAULT 1,
+        refillThreshold INTEGER DEFAULT 7,
         FOREIGN KEY (patientId) REFERENCES patients (id)
       )
     ''');
@@ -329,6 +404,10 @@ class LocalDbService {
           'reminderType': med.reminderType.name,
           'status': med.status.name,
           'startDate': med.startDate.toIso8601String(),
+          'endDate': med.endDate?.toIso8601String(),
+          'quantityRemaining': med.quantityRemaining,
+          'dosesPerDay': med.dosesPerDay,
+          'refillThreshold': med.refillThreshold,
           'notes': med.notes,
           'notesAr': med.notesAr,
         },
@@ -369,8 +448,116 @@ class LocalDbService {
       reminderType: ReminderType.values.byName(r['reminderType']),
       status: MedicationStatus.values.byName(r['status']),
       startDate: DateTime.parse(r['startDate']),
+      endDate: r['endDate'] != null
+          ? DateTime.tryParse(r['endDate'] as String)
+          : null,
+      quantityRemaining: (r['quantityRemaining'] as int?) ?? 0,
+      dosesPerDay: (r['dosesPerDay'] as num?)?.toDouble() ?? 1,
+      refillThreshold: (r['refillThreshold'] as int?) ?? 7,
       notes: r['notes'],
       notesAr: r['notesAr'],
+    );
+  }
+
+  Future<void> logMedicationChange({
+    required String patientId,
+    required String medicationId,
+    required String action,
+    required String actorRole,
+    String? actorId,
+    String? details,
+  }) async {
+    final d = await db;
+    final now = DateTime.now();
+    await d.insert(
+      'medication_change_logs',
+      {
+        'id': 'MLOG-${now.microsecondsSinceEpoch}',
+        'patientId': patientId,
+        'medicationId': medicationId,
+        'action': action,
+        'actorRole': actorRole,
+        'actorId': actorId,
+        'changedAt': now.toIso8601String(),
+        'details': details,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> logAdherenceEvent({
+    required String patientId,
+    String? medicationId,
+    required String eventType,
+    required String source,
+    String? details,
+  }) async {
+    final d = await db;
+    final now = DateTime.now();
+    await d.insert(
+      'adherence_events',
+      {
+        'id': 'AE-${now.microsecondsSinceEpoch}',
+        'patientId': patientId,
+        'medicationId': medicationId,
+        'eventType': eventType,
+        'source': source,
+        'timestamp': now.toIso8601String(),
+        'details': details,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> logRefillEvent({
+    required String patientId,
+    required Medication medication,
+    int? milestone,
+  }) async {
+    final d = await db;
+    final now = DateTime.now();
+    await d.insert(
+      'refill_events',
+      {
+        'id': 'REF-${now.microsecondsSinceEpoch}',
+        'patientId': patientId,
+        'medicationId': medication.id,
+        'medicationName': medication.name,
+        'daysRemaining': medication.estimatedDaysRemaining,
+        'threshold': medication.refillThreshold,
+        'milestone': milestone,
+        'createdAt': now.toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<bool> hasRefillEventForMilestone({
+    required String patientId,
+    required String medicationId,
+    required int milestone,
+  }) async {
+    final d = await db;
+    final rows = await d.query(
+      'refill_events',
+      where: 'patientId = ? AND medicationId = ? AND milestone = ?',
+      whereArgs: [patientId, medicationId, milestone],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> logRefillCompleted({
+    required String patientId,
+    required Medication medication,
+  }) async {
+    final d = await db;
+    final now = DateTime.now().toIso8601String();
+    await d.update(
+      'refill_events',
+      {'completedAt': now},
+      where: 'patientId = ? AND medicationId = ? AND completedAt IS NULL',
+      whereArgs: [patientId, medication.id],
     );
   }
 

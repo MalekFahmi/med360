@@ -13,7 +13,12 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
+  ValueChanged<NotificationResponse>? _responseHandler;
   bool _initialized = false;
+
+  static const actionTakeMedication = 'take_medication';
+  static const actionSnoozeMedication = 'snooze_medication';
+  static const actionDismissMedication = 'dismiss_medication';
 
   Future<void> init() async {
     if (_initialized) return;
@@ -33,9 +38,23 @@ class NotificationService {
       iOS: iosSettings,
     );
 
-    await _plugin.initialize(settings: initSettings);
+    await _plugin.initialize(
+      settings: initSettings,
+      onDidReceiveNotificationResponse: _handleNotificationResponse,
+    );
     await _createAndroidChannels();
     _initialized = true;
+  }
+
+  void setResponseHandler(ValueChanged<NotificationResponse>? handler) {
+    _responseHandler = handler;
+  }
+
+  void _handleNotificationResponse(NotificationResponse response) {
+    debugPrint(
+      'Notification action=${response.actionId} payload=${response.payload}',
+    );
+    _responseHandler?.call(response);
   }
 
   Future<void> _createAndroidChannels() async {
@@ -120,6 +139,25 @@ class NotificationService {
             playSound: true,
             enableVibration: true,
             fullScreenIntent: isAlarm,
+            actions: isAlarm
+                ? const [
+                    AndroidNotificationAction(
+                      actionTakeMedication,
+                      'Take Medication',
+                      showsUserInterface: true,
+                    ),
+                    AndroidNotificationAction(
+                      actionSnoozeMedication,
+                      'Snooze 5 min',
+                      showsUserInterface: true,
+                    ),
+                    AndroidNotificationAction(
+                      actionDismissMedication,
+                      'Dismiss',
+                      cancelNotification: true,
+                    ),
+                  ]
+                : null,
           ),
           iOS: const DarwinNotificationDetails(
             presentAlert: true,
@@ -131,7 +169,7 @@ class NotificationService {
             ? AndroidScheduleMode.alarmClock
             : AndroidScheduleMode.exactAllowWhileIdle,
         matchDateTimeComponents: DateTimeComponents.time,
-        payload: med.id,
+        payload: _medicationPayload(med.id, time),
       );
     }
   }
@@ -175,6 +213,60 @@ class NotificationService {
     );
   }
 
+  Future<void> snoozeAlarm({
+    required Medication med,
+    required ReminderTime time,
+    required bool isArabic,
+  }) async {
+    if (kIsWeb) return;
+    final scheduledAt = DateTime.now().add(const Duration(minutes: 5));
+    await _plugin.zonedSchedule(
+      id: _notificationId(med.id, time, 'snooze'),
+      title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø¨Ø§Ù„Ø¯ÙˆØ§Ø¡' : 'Medication Reminder',
+      body: isArabic
+          ? 'Ø­Ø§Ù† ÙˆÙ‚Øª ØªÙ†Ø§ÙˆÙ„ ${med.nameAr} (${med.dosage})'
+          : 'Time to take ${med.name} (${med.dosage})',
+      scheduledDate: tz.TZDateTime.from(scheduledAt, tz.local),
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'med360_alarms',
+          'Medication Alarms',
+          channelDescription: 'Alarm-style reminders for medication schedules',
+          category: AndroidNotificationCategory.alarm,
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          fullScreenIntent: true,
+          actions: [
+            AndroidNotificationAction(
+              actionTakeMedication,
+              'Take Medication',
+              showsUserInterface: true,
+            ),
+            AndroidNotificationAction(
+              actionSnoozeMedication,
+              'Snooze 5 min',
+              showsUserInterface: true,
+            ),
+            AndroidNotificationAction(
+              actionDismissMedication,
+              'Dismiss',
+              cancelNotification: true,
+            ),
+          ],
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+          presentBadge: true,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
+      payload: _medicationPayload(med.id, time),
+    );
+  }
+
   Future<void> showCaregiverAlert({
     required String medicationName,
     required String patientName,
@@ -205,6 +297,39 @@ class NotificationService {
     );
   }
 
+  Future<void> showRefillAlert({
+    required Medication medication,
+    required bool isArabic,
+  }) async {
+    if (kIsWeb) return;
+
+    await _plugin.show(
+      id: _notificationId(
+        medication.id,
+        const ReminderTime(hour: 0, minute: 0),
+        'refill',
+      ),
+      title: isArabic ? 'Refill reminder' : 'Refill reminder',
+      body:
+          '${medication.displayName} has ${medication.estimatedDaysRemaining.toStringAsFixed(1)} days remaining.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'med360_reminders',
+          'Medication Reminders',
+          channelDescription: 'Notifications for medication schedules',
+          category: AndroidNotificationCategory.reminder,
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+          presentBadge: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> cancelMedicationReminders(Medication med) async {
     if (kIsWeb) return;
 
@@ -223,6 +348,9 @@ class NotificationService {
 
   int _doseNotificationId(String doseId, String stage) =>
       '$doseId-$stage'.hashCode.abs();
+
+  String _medicationPayload(String medicationId, ReminderTime time) =>
+      'med|$medicationId|${time.display}';
 
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);

@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 
 import 'services/local_db_service.dart';
 import 'services/notification_service.dart';
 import 'services/firebase_backend_service.dart';
 import 'services/escalation_service.dart';
+import 'models/models.dart';
 import 'providers/auth_provider.dart';
 import 'providers/medication_provider.dart';
 import 'providers/adherence_provider.dart';
@@ -20,6 +22,7 @@ import 'ui/screens/medications_screen.dart';
 import 'ui/screens/adherence_screen.dart';
 import 'ui/screens/caregiver_screen.dart';
 import 'ui/screens/caregiver_dashboard_screen.dart';
+import 'ui/screens/doctor_dashboard_screen.dart';
 import 'ui/screens/settings_screen.dart';
 
 void main() async {
@@ -77,11 +80,21 @@ class _AppRouter extends StatelessWidget {
       AuthStatus.initial ||
       AuthStatus.loading =>
         const Scaffold(body: Center(child: CircularProgressIndicator())),
-      AuthStatus.authenticated =>
-        auth.isCaregiver ? const CaregiverShell() : const MainShell(),
+      AuthStatus.authenticated => auth.isDoctor
+          ? const DoctorShell()
+          : auth.isCaregiver
+              ? const CaregiverShell()
+              : const MainShell(),
       _ => const AuthScreen(),
     };
   }
+}
+
+class DoctorShell extends StatelessWidget {
+  const DoctorShell({super.key});
+
+  @override
+  Widget build(BuildContext context) => const DoctorDashboardScreen();
 }
 
 class CaregiverShell extends StatefulWidget {
@@ -98,6 +111,14 @@ class _CaregiverShellState extends State<CaregiverShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final caregiver = context.read<AuthProvider>().caregiver;
       if (caregiver != null) {
+        FirebaseBackendService().logUserEngagementEvent(
+          eventType: 'dailyAppUsage',
+          source: 'appOpen',
+          details: {
+            'role': 'caregiver',
+            'openedAt': DateTime.now().toIso8601String(),
+          },
+        );
         context.read<CaregiverProvider>().listenToCaregiverData(caregiver.uid);
       }
     });
@@ -115,21 +136,21 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool _showLogin = true;
-  bool _caregiverMode = false;
+  AccountRole _selectedRole = AccountRole.patient;
   void _toggle() => setState(() => _showLogin = !_showLogin);
-  void _setCaregiverMode(bool value) => setState(() => _caregiverMode = value);
+  void _setRole(AccountRole value) => setState(() => _selectedRole = value);
   @override
   Widget build(BuildContext context) {
     return _showLogin
         ? LoginScreen(
             onSignupTap: _toggle,
-            caregiverMode: _caregiverMode,
-            onCaregiverModeChanged: _setCaregiverMode,
+            selectedRole: _selectedRole,
+            onRoleChanged: _setRole,
           )
         : SignupScreen(
             onLoginTap: _toggle,
-            caregiverMode: _caregiverMode,
-            onCaregiverModeChanged: _setCaregiverMode,
+            selectedRole: _selectedRole,
+            onRoleChanged: _setRole,
           );
   }
 }
@@ -156,6 +177,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+    NotificationService().setResponseHandler(_handleNotificationAction);
   }
 
   @override
@@ -176,6 +198,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final reportProvider = context.read<ReportProvider>();
 
       await FirebaseBackendService().registerPatientDevice(auth.patient!);
+      await FirebaseBackendService().logUserEngagementEvent(
+        patientId: pId,
+        eventType: 'dailyAppUsage',
+        source: 'appOpen',
+        details: {
+          'role': 'patient',
+          'openedAt': DateTime.now().toIso8601String(),
+        },
+      );
       await NotificationService().requestPermissions();
       await medicationProvider.loadMedications(pId);
       final meds = medicationProvider.medications;
@@ -193,6 +224,101 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       reportProvider.buildReports(
         allDoses: adherenceProvider.allDoses,
         medications: meds,
+      );
+    }
+  }
+
+  Future<void> _handleNotificationAction(NotificationResponse response) async {
+    if (!mounted) return;
+    final payload = response.payload;
+    if (payload == null || !payload.startsWith('med|')) return;
+
+    final parts = payload.split('|');
+    if (parts.length < 3) return;
+    final medicationId = parts[1];
+    final scheduledTime = parts[2];
+
+    final auth = context.read<AuthProvider>();
+    final patient = auth.patient;
+    if (patient == null) return;
+
+    final medicationProvider = context.read<MedicationProvider>();
+    final adherenceProvider = context.read<AdherenceProvider>();
+    final medication = medicationProvider.findById(medicationId);
+    final matchingDoses = adherenceProvider.todaysDoses.where(
+      (dose) =>
+          dose.medicationId == medicationId &&
+          dose.scheduledTime == scheduledTime &&
+          dose.isPending,
+    );
+    final dose = matchingDoses.isEmpty ? null : matchingDoses.first;
+
+    final actionId = response.actionId;
+    await FirebaseBackendService().logReminderEvent(
+      patientId: patient.id,
+      medicationId: medicationId,
+      eventType: actionId == null || actionId.isEmpty
+          ? 'notificationOpened'
+          : 'notificationAction',
+      source: 'notification',
+      details: {
+        'actionId': actionId ?? 'tap',
+        'scheduledTime': scheduledTime,
+        'payload': payload,
+      },
+    );
+
+    if (actionId == null || actionId.isEmpty) return;
+
+    if (actionId == NotificationService.actionTakeMedication) {
+      if (dose == null) return;
+      await adherenceProvider.confirmDoseTaken(
+        dose.id,
+        patient.id,
+        source: 'notificationAction',
+      );
+      if (medication != null && medication.quantityRemaining > 0) {
+        await medicationProvider.updateMedication(
+          patient.id,
+          medication.copyWith(
+            quantityRemaining: medication.quantityRemaining - 1,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (actionId == NotificationService.actionSnoozeMedication) {
+      if (medication == null) return;
+      final time = ReminderTime.fromString(scheduledTime);
+      await NotificationService().snoozeAlarm(
+        med: medication,
+        time: time,
+        isArabic: auth.arabicMode,
+      );
+      await FirebaseBackendService().logReminderEvent(
+        patientId: patient.id,
+        medicationId: medication.id,
+        eventType: 'snoozedReminder',
+        source: 'notification',
+        details: {
+          'scheduledTime': scheduledTime,
+          'snoozeMinutes': 5,
+        },
+      );
+      return;
+    }
+
+    if (actionId == NotificationService.actionDismissMedication) {
+      await FirebaseBackendService().logReminderEvent(
+        patientId: patient.id,
+        medicationId: medicationId,
+        eventType: 'alarmDismissed',
+        source: 'notificationAction',
+        details: {
+          'scheduledTime': scheduledTime,
+          'doseId': dose?.id,
+        },
       );
     }
   }
@@ -252,6 +378,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoMissedTimer?.cancel();
+    NotificationService().setResponseHandler(null);
     super.dispose();
   }
 

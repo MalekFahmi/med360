@@ -6,13 +6,13 @@ import '../../providers/providers.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onLoginTap;
-  final bool caregiverMode;
-  final ValueChanged<bool> onCaregiverModeChanged;
+  final AccountRole selectedRole;
+  final ValueChanged<AccountRole> onRoleChanged;
   const SignupScreen({
     super.key,
     required this.onLoginTap,
-    required this.caregiverMode,
-    required this.onCaregiverModeChanged,
+    required this.selectedRole,
+    required this.onRoleChanged,
   });
 
   @override
@@ -26,8 +26,11 @@ class _SignupScreenState extends State<SignupScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _condCtrl = TextEditingController();
+  final _specialtyCtrl = TextEditingController();
+  final _licenseCtrl = TextEditingController();
   bool _obscure = true;
-  bool get _caregiverMode => widget.caregiverMode;
+  bool get _caregiverMode => widget.selectedRole == AccountRole.caregiver;
+  bool get _doctorMode => widget.selectedRole == AccountRole.doctor;
   DateTime? _dob;
 
   @override
@@ -37,27 +40,40 @@ class _SignupScreenState extends State<SignupScreen> {
     _phoneCtrl.dispose();
     _passCtrl.dispose();
     _condCtrl.dispose();
+    _specialtyCtrl.dispose();
+    _licenseCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthProvider>();
-    final ok = _caregiverMode
-        ? await auth.registerCaregiver(
-            name: _nameCtrl.text.trim(),
-            email: _emailCtrl.text.trim(),
-            phone: _phoneCtrl.text.trim(),
-            password: _passCtrl.text,
-          )
-        : await auth.signUp(
-            name: _nameCtrl.text.trim(),
-            phone: _phoneCtrl.text.trim(),
-            password: _passCtrl.text,
-            dateOfBirth: _dob,
-            chronicCondition:
-                _condCtrl.text.trim().isEmpty ? null : _condCtrl.text.trim(),
-          );
+    final ok = switch (widget.selectedRole) {
+      AccountRole.patient => await auth.signUp(
+          name: _nameCtrl.text.trim(),
+          phone: _phoneCtrl.text.trim(),
+          password: _passCtrl.text,
+          dateOfBirth: _dob,
+          chronicCondition:
+              _condCtrl.text.trim().isEmpty ? null : _condCtrl.text.trim(),
+        ),
+      AccountRole.caregiver => await auth.registerCaregiver(
+          name: _nameCtrl.text.trim(),
+          email: _emailCtrl.text.trim(),
+          phone: _phoneCtrl.text.trim(),
+          password: _passCtrl.text,
+        ),
+      AccountRole.doctor => await auth.registerDoctor(
+          name: _nameCtrl.text.trim(),
+          email: _emailCtrl.text.trim(),
+          phone: _phoneCtrl.text.trim(),
+          password: _passCtrl.text,
+          specialty: _specialtyCtrl.text.trim(),
+          licenseNumber: _licenseCtrl.text.trim().isEmpty
+              ? null
+              : _licenseCtrl.text.trim(),
+        ),
+    };
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content:
@@ -123,20 +139,24 @@ class _SignupScreenState extends State<SignupScreen> {
                           style:
                               AppTextStyles.screenTitle.copyWith(fontSize: 18)),
                       const SizedBox(height: AppSpacing.lg),
-                      SegmentedButton<bool>(
+                      SegmentedButton<AccountRole>(
                         segments: const [
                           ButtonSegment(
-                              value: false,
+                              value: AccountRole.patient,
                               label: Text('Patient'),
                               icon: Icon(Icons.person_outline_rounded)),
                           ButtonSegment(
-                              value: true,
+                              value: AccountRole.caregiver,
                               label: Text('Caregiver'),
                               icon: Icon(Icons.health_and_safety_outlined)),
+                          ButtonSegment(
+                              value: AccountRole.doctor,
+                              label: Text('Doctor'),
+                              icon: Icon(Icons.local_hospital_outlined)),
                         ],
-                        selected: {_caregiverMode},
+                        selected: {widget.selectedRole},
                         onSelectionChanged: (value) =>
-                            widget.onCaregiverModeChanged(value.first),
+                            widget.onRoleChanged(value.first),
                       ),
                       const SizedBox(height: AppSpacing.md),
 
@@ -152,7 +172,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       const SizedBox(height: AppSpacing.md),
 
-                      if (_caregiverMode) ...[
+                      if (_caregiverMode || _doctorMode) ...[
                         TextFormField(
                           controller: _emailCtrl,
                           keyboardType: TextInputType.emailAddress,
@@ -167,6 +187,26 @@ class _SignupScreenState extends State<SignupScreen> {
                             }
                             return null;
                           },
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+
+                      if (_doctorMode) ...[
+                        TextFormField(
+                          controller: _specialtyCtrl,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _inputDec('Medical specialty',
+                              Icons.medical_services_outlined),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'Please enter your specialty'
+                              : null,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        TextFormField(
+                          controller: _licenseCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: _inputDec('License number (optional)',
+                              Icons.badge_outlined),
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
@@ -219,7 +259,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       const SizedBox(height: AppSpacing.md),
 
-                      if (!_caregiverMode) ...[
+                      if (!_caregiverMode && !_doctorMode) ...[
                         // Date of birth (optional)
                         GestureDetector(
                           onTap: _pickDob,
@@ -281,7 +321,9 @@ class _SignupScreenState extends State<SignupScreen> {
                               : Text(
                                   _caregiverMode
                                       ? 'Create caregiver account'
-                                      : 'Create account',
+                                      : _doctorMode
+                                          ? 'Create doctor account'
+                                          : 'Create account',
                                   style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w600)),

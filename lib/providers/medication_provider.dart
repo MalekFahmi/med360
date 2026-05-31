@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
+import '../services/notification_service.dart';
 
 enum LoadStatus { initial, loading, loaded, error }
 
@@ -47,13 +49,68 @@ class MedicationProvider extends ChangeNotifier {
   // ── Patient adds a new medication ─────────────────────────────────────────
   Future<void> addMedication(String patientId, Medication med) async {
     await _db.insertMedication(patientId, med);
+    await _db.logMedicationChange(
+      patientId: patientId,
+      medicationId: med.id,
+      action: 'created',
+      actorRole: 'patient',
+    );
+    await _handleRefillMilestone(patientId, med);
+    await FirebaseBackendService().logMedicationModification(
+      patientId: patientId,
+      medication: med,
+      action: 'created',
+      actorRole: 'patient',
+    );
+    final patientUid = FirebaseBackendService().currentUid;
+    if (patientUid != null) {
+      await FirebaseBackendService().upsertPatientMedication(
+        patientUid: patientUid,
+        patientId: patientId,
+        medication: med,
+        actorRole: 'patient',
+      );
+    }
     _medications = [..._medications, med];
     notifyListeners();
   }
 
   // ── Patient edits a medication ────────────────────────────────────────────
   Future<void> updateMedication(String patientId, Medication med) async {
+    final previous = findById(med.id);
     await _db.updateMedication(patientId, med);
+    await _db.logMedicationChange(
+      patientId: patientId,
+      medicationId: med.id,
+      action: 'updated',
+      actorRole: 'patient',
+    );
+    await _handleRefillMilestone(patientId, med);
+    if (previous != null &&
+        previous.needsRefill &&
+        med.quantityRemaining > previous.quantityRemaining &&
+        !med.needsRefill) {
+      await _db.logRefillCompleted(patientId: patientId, medication: med);
+      await FirebaseBackendService().logRefillCompletion(
+        patientId: patientId,
+        medication: med,
+      );
+    }
+    await FirebaseBackendService().logMedicationModification(
+      patientId: patientId,
+      medication: med,
+      action: 'updated',
+      actorRole: 'patient',
+    );
+    final patientUid = FirebaseBackendService().currentUid;
+    if (patientUid != null) {
+      await FirebaseBackendService().upsertPatientMedication(
+        patientUid: patientUid,
+        patientId: patientId,
+        medication: med,
+        actorRole: 'patient',
+      );
+    }
     _medications = _medications.map((m) => m.id == med.id ? med : m).toList();
     notifyListeners();
   }
@@ -77,5 +134,59 @@ class MedicationProvider extends ChangeNotifier {
     if (med == null) return;
     final updated = med.copyWith(status: MedicationStatus.active);
     await updateMedication(patientId, updated);
+  }
+
+  Future<void> _handleRefillMilestone(
+    String patientId,
+    Medication medication,
+  ) async {
+    final milestone = _refillMilestoneFor(medication);
+    if (milestone == null) return;
+
+    final alreadySent = await _db.hasRefillEventForMilestone(
+      patientId: patientId,
+      medicationId: medication.id,
+      milestone: milestone,
+    );
+    if (alreadySent) return;
+
+    await _db.logRefillEvent(
+      patientId: patientId,
+      medication: medication,
+      milestone: milestone,
+    );
+    await NotificationService().showRefillAlert(
+      medication: medication,
+      isArabic: true,
+    );
+    await FirebaseBackendService().logReminderEvent(
+      patientId: patientId,
+      medicationId: medication.id,
+      eventType: 'refillReminder',
+      source: 'app',
+      details: {
+        'milestone': milestone,
+        'daysRemaining': medication.estimatedDaysRemaining,
+        'quantityRemaining': medication.quantityRemaining,
+      },
+    );
+    await FirebaseBackendService().sendRefillAlert(
+      patientId: patientId,
+      medication: medication,
+      milestone: milestone,
+    );
+  }
+
+  int? _refillMilestoneFor(Medication medication) {
+    if (medication.quantityRemaining <= 0 || medication.dosesPerDay <= 0) {
+      return null;
+    }
+    final days = medication.estimatedDaysRemaining;
+    for (final milestone in const [1, 3, 7]) {
+      if (milestone <= medication.refillThreshold && days <= milestone) {
+        return milestone;
+      }
+    }
+    return null;
   }
 }

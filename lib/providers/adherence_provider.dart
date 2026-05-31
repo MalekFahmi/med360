@@ -21,6 +21,9 @@ class AdherenceProvider extends ChangeNotifier {
   bool get isLoading => _status == LoadStatus.loading;
   String? get errorMessage => _errorMessage;
   List<DoseConfirmation> get allDoses => _allDoses;
+  bool _showDailyCelebration = false;
+
+  bool get showDailyCelebration => _showDailyCelebration;
 
   List<DoseConfirmation> get todaysDoses {
     final today = DateTime.now();
@@ -29,6 +32,18 @@ class AdherenceProvider extends ChangeNotifier {
   }
 
   int get pendingCount => todaysDoses.where((d) => d.isPending).length;
+  int get todaysTakenCount => todaysDoses.where((d) => d.isTaken).length;
+  int get todaysMissedCount => todaysDoses.where((d) => d.isMissed).length;
+  double get todaysAdherenceRate {
+    final resolved = todaysTakenCount + todaysMissedCount;
+    if (resolved == 0) {
+      return todaysDoses.isNotEmpty && pendingCount == 0 ? 1.0 : 0.0;
+    }
+    return todaysTakenCount / resolved;
+  }
+
+  int get currentStreak => _streaks().$1;
+  int get longestStreak => _streaks().$2;
 
   List<DoseConfirmation> dosesForDate(DateTime date) =>
       _allDoses.where((d) => d.isOnDate(date)).toList();
@@ -36,6 +51,11 @@ class AdherenceProvider extends ChangeNotifier {
   bool allTakenOnDate(DateTime date) {
     final doses = dosesForDate(date);
     return doses.isNotEmpty && doses.every((d) => d.isTaken);
+  }
+
+  void clearDailyCelebration() {
+    _showDailyCelebration = false;
+    notifyListeners();
   }
 
   bool anyMissedOnDate(DateTime date) =>
@@ -122,10 +142,15 @@ class AdherenceProvider extends ChangeNotifier {
   }
 
   // ── FR5: Confirm taken ────────────────────────────────────────────────────
-  Future<void> confirmDoseTaken(String doseId, String patientId) async {
+  Future<void> confirmDoseTaken(
+    String doseId,
+    String patientId, {
+    String source = 'patient',
+  }) async {
+    final confirmedAt = DateTime.now();
     _allDoses = _allDoses.map((d) {
       if (d.id != doseId) return d;
-      return d.copyWith(status: DoseStatus.taken, confirmedAt: DateTime.now());
+      return d.copyWith(status: DoseStatus.taken, confirmedAt: confirmedAt);
     }).toList();
     notifyListeners();
     final updated = _allDoses.firstWhere((d) => d.id == doseId);
@@ -136,6 +161,37 @@ class AdherenceProvider extends ChangeNotifier {
       patientId: patientId,
       dose: updated,
     );
+    await _db.logAdherenceEvent(
+      patientId: patientId,
+      medicationId: updated.medicationId,
+      eventType: 'taken',
+      source: source,
+      details: updated.id,
+    );
+    final delay = confirmedAt.difference(_scheduledDateTime(updated));
+    if (delay.inMinutes > 0) {
+      await FirebaseBackendService().logAdherenceEvent(
+        patientId: patientId,
+        medicationId: updated.medicationId,
+        eventType: 'delayedDose',
+        source: source,
+        details: {
+          'doseId': updated.id,
+          'scheduledTime': updated.scheduledTime,
+          'delayMinutes': delay.inMinutes,
+        },
+      );
+    }
+    if (allTakenOnDate(DateTime.now())) {
+      _showDailyCelebration = true;
+      await FirebaseBackendService().logAdherenceEvent(
+        patientId: patientId,
+        eventType: 'dailyCompletion',
+        source: 'app',
+        details: {'date': DateTime.now().toIso8601String()},
+      );
+      notifyListeners();
+    }
   }
 
   // ── FR5 + FR8: Confirm missed, return caregiver IDs to alert ─────────────
@@ -163,6 +219,24 @@ class AdherenceProvider extends ChangeNotifier {
     await FirebaseBackendService().updateDoseStatus(
       patientId: patientId,
       dose: updated,
+    );
+    await _db.logAdherenceEvent(
+      patientId: patientId,
+      medicationId: updated.medicationId,
+      eventType: 'missed',
+      source: 'patient',
+      details: updated.id,
+    );
+    await FirebaseBackendService().logAdherenceEvent(
+      patientId: patientId,
+      medicationId: updated.medicationId,
+      eventType: 'manualMissedDose',
+      source: 'patient',
+      details: {
+        'doseId': updated.id,
+        'scheduledTime': updated.scheduledTime,
+        'caregiverNotified': updated.caregiverNotified,
+      },
     );
 
     if (!caregiverAlertsEnabled) return [];
@@ -198,6 +272,18 @@ class AdherenceProvider extends ChangeNotifier {
       await FirebaseBackendService().updateDoseStatus(
         patientId: patientId,
         dose: dose,
+      );
+      await FirebaseBackendService().logAdherenceEvent(
+        patientId: patientId,
+        medicationId: dose.medicationId,
+        eventType: 'autoMissedDose',
+        source: 'appScheduler',
+        details: {
+          'doseId': dose.id,
+          'scheduledTime': dose.scheduledTime,
+          'autoMissDelayMinutes': EscalationService.autoMissDelay.inMinutes,
+          'caregiverNotified': dose.caregiverNotified,
+        },
       );
     }
     if (missedDoses.isNotEmpty) notifyListeners();
@@ -256,5 +342,49 @@ class AdherenceProvider extends ChangeNotifier {
       hour,
       minute,
     );
+  }
+
+  (int current, int longest) _streaks() {
+    if (_allDoses.isEmpty) return (0, 0);
+    final dates = _allDoses
+        .map((dose) => DateTime(
+              dose.scheduledDate.year,
+              dose.scheduledDate.month,
+              dose.scheduledDate.day,
+            ))
+        .toSet()
+        .toList()
+      ..sort();
+
+    var longest = 0;
+    var run = 0;
+    DateTime? previous;
+    for (final date in dates) {
+      if (!allTakenOnDate(date)) {
+        run = 0;
+        previous = date;
+        continue;
+      }
+      if (previous == null || date.difference(previous).inDays == 1) {
+        run += 1;
+      } else {
+        run = 1;
+      }
+      if (run > longest) longest = run;
+      previous = date;
+    }
+
+    final today = DateTime.now();
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    var current = 0;
+    var cursor = todayOnly;
+    while (true) {
+      final doses = dosesForDate(cursor);
+      if (doses.isEmpty || !doses.every((dose) => dose.isTaken)) break;
+      current += 1;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+
+    return (current, longest);
   }
 }

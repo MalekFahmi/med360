@@ -48,6 +48,10 @@ class Medication {
   final ReminderType reminderType;
   final MedicationStatus status;
   final DateTime startDate;
+  final DateTime? endDate;
+  final int quantityRemaining;
+  final double dosesPerDay;
+  final int refillThreshold;
   final String? notes;
   final String? notesAr;
 
@@ -63,12 +67,20 @@ class Medication {
     required this.reminderType,
     required this.status,
     required this.startDate,
+    this.endDate,
+    this.quantityRemaining = 0,
+    this.dosesPerDay = 1,
+    this.refillThreshold = 7,
     this.notes,
     this.notesAr,
   });
 
   String get displayName => '$name $dosage';
   String get displayNameAr => '$nameAr $dosage';
+  double get estimatedDaysRemaining =>
+      dosesPerDay <= 0 ? 0 : quantityRemaining / dosesPerDay;
+  bool get needsRefill =>
+      quantityRemaining > 0 && estimatedDaysRemaining <= refillThreshold;
 
   String get formLabel => switch (form) {
         MedicationForm.tablet => 'Tablet',
@@ -124,6 +136,10 @@ class Medication {
         'reminderType': reminderType.name,
         'status': status.name,
         'startDate': startDate.toIso8601String(),
+        'endDate': endDate?.toIso8601String(),
+        'quantityRemaining': quantityRemaining,
+        'dosesPerDay': dosesPerDay,
+        'refillThreshold': refillThreshold,
         'notes': notes,
         'notesAr': notesAr,
       };
@@ -142,6 +158,10 @@ class Medication {
         reminderType: ReminderType.values.byName(m['reminderType']),
         status: MedicationStatus.values.byName(m['status']),
         startDate: DateTime.parse(m['startDate']),
+        endDate: m['endDate'] != null ? DateTime.tryParse(m['endDate']) : null,
+        quantityRemaining: m['quantityRemaining'] ?? 0,
+        dosesPerDay: (m['dosesPerDay'] as num?)?.toDouble() ?? 1,
+        refillThreshold: m['refillThreshold'] ?? 7,
         notes: m['notes'],
         notesAr: m['notesAr'],
       );
@@ -156,6 +176,10 @@ class Medication {
     List<ReminderTime>? reminderTimes,
     ReminderType? reminderType,
     MedicationStatus? status,
+    DateTime? endDate,
+    int? quantityRemaining,
+    double? dosesPerDay,
+    int? refillThreshold,
     String? notes,
     String? notesAr,
   }) =>
@@ -171,6 +195,10 @@ class Medication {
         reminderType: reminderType ?? this.reminderType,
         status: status ?? this.status,
         startDate: startDate,
+        endDate: endDate ?? this.endDate,
+        quantityRemaining: quantityRemaining ?? this.quantityRemaining,
+        dosesPerDay: dosesPerDay ?? this.dosesPerDay,
+        refillThreshold: refillThreshold ?? this.refillThreshold,
         notes: notes ?? this.notes,
         notesAr: notesAr ?? this.notesAr,
       );

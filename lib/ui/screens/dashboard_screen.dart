@@ -10,10 +10,40 @@ class DashboardScreen extends StatelessWidget {
 
   void _onTake(BuildContext context, DoseConfirmation dose) async {
     final auth = context.read<AuthProvider>();
+    final medicationProvider = context.read<MedicationProvider>();
     await context
         .read<AdherenceProvider>()
         .confirmDoseTaken(dose.id, auth.patient!.id);
+    final medication = medicationProvider.findById(dose.medicationId);
+    if (medication != null && medication.quantityRemaining > 0) {
+      await medicationProvider.updateMedication(
+        auth.patient!.id,
+        medication.copyWith(
+          quantityRemaining: medication.quantityRemaining - 1,
+        ),
+      );
+    }
     if (context.mounted) {
+      final adherence = context.read<AdherenceProvider>();
+      if (adherence.showDailyCelebration) {
+        adherence.clearDailyCelebration();
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Great job!'),
+            content: const Text(
+              'You completed all your medications today. Keep the streak going.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        );
+        if (!context.mounted) return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('✓  ${dose.medicationName} taken'),
         backgroundColor: AppColors.teal,
@@ -73,6 +103,7 @@ class DashboardScreen extends StatelessWidget {
     final rate = adh.monthlyAdherenceRate(now.year, now.month);
     final taken = today.where((d) => d.isTaken).length;
     final missed = today.where((d) => d.isMissed).length;
+    final refillRisks = meds.medications.where((m) => m.needsRefill).toList();
 
     return Scaffold(
       backgroundColor: AppColors.grayLight,
@@ -137,6 +168,106 @@ class DashboardScreen extends StatelessWidget {
                       value: '${adh.pendingCount}',
                       valueColor: AppColors.grayDark),
                 ],
+              ),
+              const SizedBox(height: AppSpacing.lg),
+
+              AppCard(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.local_fire_department_outlined,
+                        title: 'Current streak',
+                        value: '${adh.currentStreak} days',
+                      ),
+                    ),
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.emoji_events_outlined,
+                        title: 'Best streak',
+                        value: '${adh.longestStreak} days',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              if (adh.currentStreak >= 3) ...[
+                AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Achievement badges',
+                          style: AppTextStyles.medName),
+                      const SizedBox(height: AppSpacing.sm),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final milestone in const [3, 7, 14, 30, 100])
+                            if (adh.currentStreak >= milestone)
+                              AppBadge(
+                                label: '$milestone days',
+                                variant: BadgeVariant.green,
+                                icon: Icons.emoji_events_outlined,
+                              ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+
+              if (refillRisks.isNotEmpty) ...[
+                AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.inventory_2_outlined,
+                              color: AppColors.amber),
+                          SizedBox(width: AppSpacing.sm),
+                          Text('Refill alerts', style: AppTextStyles.medName),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      ...refillRisks.take(3).map(
+                            (med) => Padding(
+                              padding:
+                                  const EdgeInsets.only(top: AppSpacing.xs),
+                              child: Text(
+                                '${isAr ? med.displayNameAr : med.displayName}: ${med.estimatedDaysRemaining.toStringAsFixed(1)} days left',
+                                style: AppTextStyles.medDetail,
+                              ),
+                            ),
+                          ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+
+              AppCard(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.health_and_safety_outlined,
+                        title: 'Caregivers',
+                        value: '${auth.caregivers.length}',
+                      ),
+                    ),
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.local_hospital_outlined,
+                        title: 'Doctors',
+                        value: '${auth.linkedDoctors.length}',
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: AppSpacing.lg),
 
@@ -270,6 +401,37 @@ class _DoseCard extends StatelessWidget {
             onTake: dose.isPending ? onTake : null,
             onMiss: dose.isPending ? onMiss : null),
       ]),
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+
+  const _MiniStat({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.teal),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: AppTextStyles.medDetail),
+              Text(value, style: AppTextStyles.medName),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

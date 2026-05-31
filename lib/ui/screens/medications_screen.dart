@@ -4,6 +4,7 @@ import '../widgets/shared_widgets.dart';
 import '../theme/app_theme.dart';
 import '../../providers/providers.dart';
 import '../../models/models.dart';
+import '../../services/firebase_backend_service.dart';
 import '../../services/notification_service.dart';
 
 class MedicationsScreen extends StatelessWidget {
@@ -18,7 +19,7 @@ class MedicationsScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => _MedicationFormSheet(
+      builder: (_) => MedicationFormSheet(
         initialMedication: med,
         isArabic: auth.arabicMode,
       ),
@@ -36,6 +37,17 @@ class MedicationsScreen extends StatelessWidget {
     await NotificationService().scheduleMedicationReminders(
       saved,
       isArabic: auth.arabicMode,
+    );
+    await FirebaseBackendService().logReminderEvent(
+      patientId: auth.patient!.id,
+      medicationId: saved.id,
+      eventType: 'reminderScheduled',
+      source: 'patient',
+      details: {
+        'reminderType': saved.reminderType.name,
+        'scheduleTimes':
+            saved.reminderTimes.map((time) => time.display).toList(),
+      },
     );
     await adhProv.loadAndGenerate(
       patientId: auth.patient!.id,
@@ -77,6 +89,18 @@ class MedicationsScreen extends StatelessWidget {
 
     await medProv.deleteMedication(med.id);
     await NotificationService().cancelMedicationReminders(med);
+    if (auth.patient != null) {
+      await FirebaseBackendService().logReminderEvent(
+        patientId: auth.patient!.id,
+        medicationId: med.id,
+        eventType: 'reminderCancelled',
+        source: 'patient',
+        details: {
+          'reason': 'medicationDeleted',
+          'reminderType': med.reminderType.name,
+        },
+      );
+    }
     if (auth.patient != null && context.mounted) {
       await adhProv.loadAndGenerate(
         patientId: auth.patient!.id,
@@ -233,25 +257,29 @@ class MedicationsScreen extends StatelessWidget {
   }
 }
 
-class _MedicationFormSheet extends StatefulWidget {
+class MedicationFormSheet extends StatefulWidget {
   final Medication? initialMedication;
   final bool isArabic;
-  const _MedicationFormSheet({
+  const MedicationFormSheet({
+    super.key,
     required this.isArabic,
     this.initialMedication,
   });
 
   @override
-  State<_MedicationFormSheet> createState() => _MedicationFormSheetState();
+  State<MedicationFormSheet> createState() => _MedicationFormSheetState();
 }
 
-class _MedicationFormSheetState extends State<_MedicationFormSheet> {
+class _MedicationFormSheetState extends State<MedicationFormSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _nameArCtrl;
   late final TextEditingController _dosageCtrl;
   late final TextEditingController _conditionCtrl;
   late final TextEditingController _notesCtrl;
+  late final TextEditingController _quantityCtrl;
+  late final TextEditingController _dosesPerDayCtrl;
+  late final TextEditingController _refillThresholdCtrl;
   late MedicationForm _form;
   late ReminderType _reminderType;
   late MedicationStatus _status;
@@ -266,6 +294,12 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
     _dosageCtrl = TextEditingController(text: med?.dosage ?? '');
     _conditionCtrl = TextEditingController(text: med?.indication ?? '');
     _notesCtrl = TextEditingController(text: med?.notes ?? '');
+    _quantityCtrl =
+        TextEditingController(text: (med?.quantityRemaining ?? 0).toString());
+    _dosesPerDayCtrl =
+        TextEditingController(text: (med?.dosesPerDay ?? 1).toString());
+    _refillThresholdCtrl =
+        TextEditingController(text: (med?.refillThreshold ?? 7).toString());
     _form = med?.form ?? MedicationForm.tablet;
     _reminderType = med?.reminderType ?? ReminderType.notification;
     _status = med?.status ?? MedicationStatus.active;
@@ -280,6 +314,9 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
     _dosageCtrl.dispose();
     _conditionCtrl.dispose();
     _notesCtrl.dispose();
+    _quantityCtrl.dispose();
+    _dosesPerDayCtrl.dispose();
+    _refillThresholdCtrl.dispose();
     super.dispose();
   }
 
@@ -312,6 +349,9 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
       reminderType: _reminderType,
       status: _status,
       startDate: existing?.startDate ?? DateTime.now(),
+      quantityRemaining: int.tryParse(_quantityCtrl.text.trim()) ?? 0,
+      dosesPerDay: double.tryParse(_dosesPerDayCtrl.text.trim()) ?? 1,
+      refillThreshold: int.tryParse(_refillThresholdCtrl.text.trim()) ?? 7,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
     );
     Navigator.pop(context, med);
@@ -443,6 +483,46 @@ class _MedicationFormSheetState extends State<_MedicationFormSheet> {
                 onChanged: (value) {
                   if (value != null) setState(() => _reminderType = value);
                 },
+              ),
+              const SizedBox(height: AppSpacing.md),
+              SectionLabel(isAr ? 'Ø§Ù„Ù…Ø®Ø²ÙˆÙ†' : 'Inventory'),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _quantityCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: isAr
+                            ? 'Ø§Ù„ÙƒÙ…ÙŠØ© Ø§Ù„Ù…ØªØ¨Ù‚ÙŠØ©'
+                            : 'Quantity left',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _dosesPerDayCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText:
+                            isAr ? 'Ø¬Ø±Ø¹Ø§Øª ÙŠÙˆÙ…ÙŠØ§Ù‹' : 'Doses/day',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: _refillThresholdCtrl,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: isAr
+                      ? 'Ø­Ø¯ ØªÙ†Ø¨ÙŠÙ‡ Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ¹Ø¨Ø¦Ø©'
+                      : 'Refill threshold days',
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
