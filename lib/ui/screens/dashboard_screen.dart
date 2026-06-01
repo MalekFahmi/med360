@@ -21,6 +21,7 @@ class DashboardScreen extends StatelessWidget {
         medication.copyWith(
           quantityRemaining: medication.quantityRemaining - 1,
         ),
+        isArabic: auth.arabicMode,
       );
     }
     if (context.mounted) {

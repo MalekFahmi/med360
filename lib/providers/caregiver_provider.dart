@@ -40,12 +40,16 @@ class CaregiverProvider extends ChangeNotifier {
   }
 
   Future<void> loadSharedReports(String caregiverUid) async {
-    _sharedReports =
-        await FirebaseBackendService().fetchSharedReportsForRecipient(
-      recipientId: caregiverUid,
-      recipientRole: 'caregiver',
-    );
-    notifyListeners();
+    try {
+      _sharedReports =
+          await FirebaseBackendService().fetchSharedReportsForRecipient(
+        recipientId: caregiverUid,
+        recipientRole: 'caregiver',
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Caregiver shared report load skipped: $e');
+    }
   }
 
   Future<void> markReportReviewed(String reportId) async {
@@ -90,66 +94,73 @@ class CaregiverProvider extends ChangeNotifier {
         .where('caregiverUid', isEqualTo: caregiverUid)
         .snapshots()
         .listen((snapshot) async {
-      final patients = <Map<String, dynamic>>[];
-      for (final doc in snapshot.docs) {
-        final patientId = doc.data()['patientId'] as String?;
-        final idParts = doc.id.split('_');
-        final patientUid = doc.data()['patientUid'] as String? ??
-            (idParts.isEmpty ? null : idParts.first);
-        if (patientUid == null && patientId == null) continue;
-        var patientDoc = patientUid == null
-            ? null
-            : await firestore.collection('patients').doc(patientUid).get();
-        if ((patientDoc == null || !patientDoc.exists) && patientId != null) {
-          patientDoc =
-              await firestore.collection('patients').doc(patientId).get();
+      try {
+        final patients = <Map<String, dynamic>>[];
+        for (final doc in snapshot.docs) {
+          final patientId = doc.data()['patientId'] as String?;
+          final idParts = doc.id.split('_');
+          final patientUid = doc.data()['patientUid'] as String? ??
+              (idParts.isEmpty ? null : idParts.first);
+          if (patientUid == null && patientId == null) continue;
+          var patientDoc = patientUid == null
+              ? null
+              : await firestore.collection('patients').doc(patientUid).get();
+          if ((patientDoc == null || !patientDoc.exists) && patientId != null) {
+            patientDoc =
+                await firestore.collection('patients').doc(patientId).get();
+          }
+          final patientData = patientDoc?.data() ?? {};
+          var adherenceRate = 0.0;
+          var missedCount = 0;
+          var refillRisk = 0;
+          if (patientUid != null) {
+            final doses = await firestore
+                .collection('patientDoses')
+                .where('ownerUid', isEqualTo: patientUid)
+                .limit(50)
+                .get();
+            final resolved = doses.docs.where((dose) {
+              final status = dose.data()['status'];
+              return status == 'taken' || status == 'missed';
+            }).toList();
+            final taken = resolved
+                .where((dose) => dose.data()['status'] == 'taken')
+                .length;
+            missedCount = resolved
+                .where((dose) => dose.data()['status'] == 'missed')
+                .length;
+            adherenceRate = resolved.isEmpty ? 0 : taken / resolved.length;
+            final meds = await firestore
+                .collection('medicationChangeLogs')
+                .where('patientId', isEqualTo: patientId)
+                .limit(25)
+                .get();
+            refillRisk = meds.docs
+                .where((doc) =>
+                    ((doc.data()['quantityRemaining'] as num?) ?? 0) > 0 &&
+                    ((doc.data()['quantityRemaining'] as num?) ?? 0) /
+                            (((doc.data()['dosesPerDay'] as num?) ?? 1)) <=
+                        (((doc.data()['refillThreshold'] as num?) ?? 7)))
+                .length;
+          }
+          patients.add({
+            'patientId': patientId,
+            'patientUid': patientUid,
+            'name': patientData['name'] ?? patientId,
+            'phone': patientData['phone'] ?? '',
+            'adherenceRate': adherenceRate,
+            'missedCount': missedCount,
+            'refillRisk': refillRisk,
+            'linkedAt': doc.data()['linkedAt'],
+          });
         }
-        final patientData = patientDoc?.data() ?? {};
-        var adherenceRate = 0.0;
-        var missedCount = 0;
-        var refillRisk = 0;
-        if (patientUid != null) {
-          final doses = await firestore
-              .collection('patientDoses')
-              .where('ownerUid', isEqualTo: patientUid)
-              .limit(50)
-              .get();
-          final resolved = doses.docs.where((dose) {
-            final status = dose.data()['status'];
-            return status == 'taken' || status == 'missed';
-          }).toList();
-          final taken =
-              resolved.where((dose) => dose.data()['status'] == 'taken').length;
-          missedCount = resolved
-              .where((dose) => dose.data()['status'] == 'missed')
-              .length;
-          adherenceRate = resolved.isEmpty ? 0 : taken / resolved.length;
-          final meds = await firestore
-              .collection('medicationChangeLogs')
-              .where('patientId', isEqualTo: patientId)
-              .limit(25)
-              .get();
-          refillRisk = meds.docs
-              .where((doc) =>
-                  ((doc.data()['quantityRemaining'] as num?) ?? 0) > 0 &&
-                  ((doc.data()['quantityRemaining'] as num?) ?? 0) /
-                          (((doc.data()['dosesPerDay'] as num?) ?? 1)) <=
-                      (((doc.data()['refillThreshold'] as num?) ?? 7)))
-              .length;
-        }
-        patients.add({
-          'patientId': patientId,
-          'patientUid': patientUid,
-          'name': patientData['name'] ?? patientId,
-          'phone': patientData['phone'] ?? '',
-          'adherenceRate': adherenceRate,
-          'missedCount': missedCount,
-          'refillRisk': refillRisk,
-          'linkedAt': doc.data()['linkedAt'],
-        });
+        _linkedPatients = patients;
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Linked patient stream update skipped: $e');
       }
-      _linkedPatients = patients;
-      notifyListeners();
+    }, onError: (Object e) {
+      debugPrint('Linked patient stream failed: $e');
     });
   }
 
@@ -169,6 +180,8 @@ class CaregiverProvider extends ChangeNotifier {
           .map((doc) => _mapFirestoreToNotification(doc.data()))
           .toList();
       notifyListeners();
+    }, onError: (Object e) {
+      debugPrint('Caregiver inbox stream failed: $e');
     });
   }
 
@@ -178,6 +191,7 @@ class CaregiverProvider extends ChangeNotifier {
       caregiverId: data['caregiverId'] ?? '',
       caregiverName: data['caregiverName'] ?? '',
       patientId: data['patientId'] ?? '',
+      patientUid: data['patientUid'],
       patientName: data['patientName'] ?? '',
       medicationId: data['medicationId'],
       medicationName: data['medicationName'],
@@ -273,6 +287,7 @@ class CaregiverProvider extends ChangeNotifier {
     if (notification != null) {
       await FirebaseBackendService().logAdherenceEvent(
         patientId: notification.patientId,
+        patientUid: notification.patientUid,
         medicationId: notification.medicationId,
         eventType: 'caregiverNotificationAcknowledged',
         source: 'caregiver',
@@ -312,6 +327,7 @@ class CaregiverProvider extends ChangeNotifier {
         if (notification != null) {
           await FirebaseBackendService().logAdherenceEvent(
             patientId: notification.patientId,
+            patientUid: notification.patientUid,
             medicationId: notification.medicationId,
             eventType: 'caregiverNotificationAcknowledged',
             source: 'caregiver',

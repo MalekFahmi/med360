@@ -144,10 +144,10 @@ exports.autoMissPatientDose = onDocumentCreated(
         channel: "both",
         acknowledged: false,
         title: latestDose.language === "ar" ?
-          "Missed Medication Alert" :
+          "تنبيه جرعة فائتة" :
           "Missed Medication Alert",
         body: latestDose.language === "ar" ?
-          `${latestDose.patientName || "Patient"} missed ${latestDose.medicationName || "a scheduled medication"}.` :
+          `${latestDose.patientName || "Patient"} فاتته جرعة ${latestDose.medicationName || "دواء مجدولة"}.` :
           `${latestDose.patientName || "Patient"} missed ${latestDose.medicationName || "a scheduled medication"}.`,
         language: String(latestDose.language || "en"),
         type: "missedDose",

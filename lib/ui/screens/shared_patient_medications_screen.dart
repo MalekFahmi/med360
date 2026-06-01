@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../models/models.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/firebase_backend_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
@@ -36,34 +38,56 @@ class _SharedPatientMedicationsScreenState
   }
 
   Future<void> _load() async {
-    final meds = await FirebaseBackendService().fetchPatientMedications(
-      _patientUid,
-    );
-    if (!mounted) return;
-    setState(() {
-      _medications = meds;
-      _loading = false;
-    });
+    try {
+      final meds = await FirebaseBackendService().fetchPatientMedications(
+        _patientUid,
+      );
+      if (!mounted) return;
+      setState(() {
+        _medications = meds;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load medications for this patient.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _editMedication({Medication? medication}) async {
+    final isArabic = context.read<AuthProvider>().arabicMode;
     final saved = await showModalBottomSheet<Medication>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => MedicationFormSheet(
         initialMedication: medication,
-        isArabic: false,
+        isArabic: isArabic,
       ),
     );
     if (saved == null) return;
-    await FirebaseBackendService().upsertPatientMedication(
-      patientUid: _patientUid,
-      patientId: _patientId,
-      medication: saved,
-      actorRole: widget.actorRole,
-    );
-    await _load();
+    try {
+      await FirebaseBackendService().upsertPatientMedication(
+        patientUid: _patientUid,
+        patientId: _patientId,
+        medication: saved,
+        actorRole: widget.actorRole,
+      );
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save medication changes.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override

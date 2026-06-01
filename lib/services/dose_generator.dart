@@ -15,9 +15,16 @@ class DoseGenerator {
 
     for (final med in medications) {
       if (med.status != MedicationStatus.active) continue;
-      if (date.isBefore(med.startDate.subtract(const Duration(days: 1)))) {
-        continue;
-      }
+      final targetDate = DateTime(date.year, date.month, date.day);
+      final startDate = DateTime(
+        med.startDate.year,
+        med.startDate.month,
+        med.startDate.day,
+      );
+      final end = med.endDate;
+      final endDate = end == null ? null : DateTime(end.year, end.month, end.day);
+      if (targetDate.isBefore(startDate)) continue;
+      if (endDate != null && targetDate.isAfter(endDate)) continue;
 
       for (final time in med.reminderTimes) {
         final timeStr = time.display;

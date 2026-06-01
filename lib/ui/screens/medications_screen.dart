@@ -27,28 +27,53 @@ class MedicationsScreen extends StatelessWidget {
 
     if (saved == null || auth.patient == null) return;
 
-    if (med == null) {
-      await medProv.addMedication(auth.patient!.id, saved);
-    } else {
-      await NotificationService().cancelMedicationReminders(med);
-      await medProv.updateMedication(auth.patient!.id, saved);
+    try {
+      if (med == null) {
+        await medProv.addMedication(
+          auth.patient!.id,
+          saved,
+          isArabic: auth.arabicMode,
+        );
+      } else {
+        await NotificationService().cancelMedicationReminders(med);
+        await medProv.updateMedication(
+          auth.patient!.id,
+          saved,
+          isArabic: auth.arabicMode,
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Saved locally, but cloud sync failed. Please try again online.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
 
-    await NotificationService().scheduleMedicationReminders(
-      saved,
-      isArabic: auth.arabicMode,
-    );
-    await FirebaseBackendService().logReminderEvent(
-      patientId: auth.patient!.id,
-      medicationId: saved.id,
-      eventType: 'reminderScheduled',
-      source: 'patient',
-      details: {
-        'reminderType': saved.reminderType.name,
-        'scheduleTimes':
-            saved.reminderTimes.map((time) => time.display).toList(),
-      },
-    );
+    try {
+      await NotificationService().scheduleMedicationReminders(
+        saved,
+        isArabic: auth.arabicMode,
+      );
+      await FirebaseBackendService().logReminderEvent(
+        patientId: auth.patient!.id,
+        medicationId: saved.id,
+        eventType: 'reminderScheduled',
+        source: 'patient',
+        details: {
+          'reminderType': saved.reminderType.name,
+          'scheduleTimes':
+              saved.reminderTimes.map((time) => time.display).toList(),
+        },
+      );
+    } catch (e) {
+      debugPrint('Medication reminder scheduling skipped: $e');
+    }
     await adhProv.loadAndGenerate(
       patientId: auth.patient!.id,
       medications: medProv.medications,
@@ -485,7 +510,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                 },
               ),
               const SizedBox(height: AppSpacing.md),
-              SectionLabel(isAr ? 'Ø§Ù„Ù…Ø®Ø²ÙˆÙ†' : 'Inventory'),
+              SectionLabel(isAr ? 'المخزون' : 'Inventory'),
               const SizedBox(height: AppSpacing.sm),
               Row(
                 children: [
@@ -494,9 +519,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                       controller: _quantityCtrl,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: isAr
-                            ? 'Ø§Ù„ÙƒÙ…ÙŠØ© Ø§Ù„Ù…ØªØ¨Ù‚ÙŠØ©'
-                            : 'Quantity left',
+                        labelText: isAr ? 'الكمية المتبقية' : 'Quantity left',
                       ),
                     ),
                   ),
@@ -507,8 +530,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
-                        labelText:
-                            isAr ? 'Ø¬Ø±Ø¹Ø§Øª ÙŠÙˆÙ…ÙŠØ§Ù‹' : 'Doses/day',
+                        labelText: isAr ? 'جرعات يوميا' : 'Doses/day',
                       ),
                     ),
                   ),
@@ -519,9 +541,8 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                 controller: _refillThresholdCtrl,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: isAr
-                      ? 'Ø­Ø¯ ØªÙ†Ø¨ÙŠÙ‡ Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ¹Ø¨Ø¦Ø©'
-                      : 'Refill threshold days',
+                  labelText:
+                      isAr ? 'حد تنبيه إعادة التعبئة' : 'Refill threshold days',
                 ),
               ),
               const SizedBox(height: AppSpacing.md),

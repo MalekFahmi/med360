@@ -28,25 +28,33 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
 
   Future<void> _loadPatients() async {
     final doctor = context.read<AuthProvider>().doctor;
-    if (doctor == null) return;
-    await FirebaseBackendService().logUserEngagementEvent(
-      eventType: 'dailyAppUsage',
-      source: 'appOpen',
-      details: {
-        'role': 'doctor',
-        'openedAt': DateTime.now().toIso8601String(),
-      },
-    );
-    final patients =
-        await FirebaseBackendService().fetchAssignedPatientsForDoctor(
-      doctor.uid,
-    );
-    final reports =
-        await FirebaseBackendService().fetchSharedReportsForRecipient(
-      recipientId: doctor.uid,
-      recipientRole: 'doctor',
-    );
-    final inbox = await FirebaseBackendService().fetchDoctorInbox(doctor.uid);
+    if (doctor == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    List<Map<String, dynamic>> patients = const [];
+    List<Map<String, dynamic>> reports = const [];
+    List<Map<String, dynamic>> inbox = const [];
+    try {
+      await FirebaseBackendService().logUserEngagementEvent(
+        eventType: 'dailyAppUsage',
+        source: 'appOpen',
+        details: {
+          'role': 'doctor',
+          'openedAt': DateTime.now().toIso8601String(),
+        },
+      );
+      patients = await FirebaseBackendService().fetchAssignedPatientsForDoctor(
+        doctor.uid,
+      );
+      reports = await FirebaseBackendService().fetchSharedReportsForRecipient(
+        recipientId: doctor.uid,
+        recipientRole: 'doctor',
+      );
+      inbox = await FirebaseBackendService().fetchDoctorInbox(doctor.uid);
+    } catch (e) {
+      debugPrint('Doctor dashboard load skipped: $e');
+    }
     if (!mounted) return;
     setState(() {
       _patients = patients;
@@ -136,10 +144,12 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                   'Patients can assign you from their Care Team screen using your registered email.',
             )
           else
-            ..._patients.map((patient) => Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: _PatientTile(patient: patient),
-                )),
+            ..._patients.map(
+              (patient) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: _PatientTile(patient: patient),
+              ),
+            ),
           const SizedBox(height: AppSpacing.md),
           _MetricCard(
             icon: Icons.summarize_outlined,
@@ -159,14 +169,16 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
             ..._reports
                 .where((report) => report['archived'] != true)
                 .take(5)
-                .map((report) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _ReportTile(
-                        report: report,
-                        onReview: () => _reviewReport(report['id']),
-                        onArchive: () => _archiveReport(report['id']),
-                      ),
-                    )),
+                .map(
+                  (report) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _ReportTile(
+                      report: report,
+                      onReview: () => _reviewReport(report['id']),
+                      onArchive: () => _archiveReport(report['id']),
+                    ),
+                  ),
+                ),
           const SizedBox(height: AppSpacing.md),
           _TrendComparisonCard(reports: _reports),
           const SizedBox(height: AppSpacing.md),
@@ -188,10 +200,12 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
             ..._inbox
                 .where((item) => item['type'] == 'refillAlert')
                 .take(5)
-                .map((item) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _InboxTile(item: item),
-                    )),
+                .map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _InboxTile(item: item),
+                  ),
+                ),
         ],
       ),
     );
@@ -218,8 +232,10 @@ class _InboxTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item['title'] ?? 'Refill reminder',
-                    style: AppTextStyles.medName),
+                Text(
+                  item['title'] ?? 'Refill reminder',
+                  style: AppTextStyles.medName,
+                ),
                 const SizedBox(height: 4),
                 Text(item['body'] ?? '', style: AppTextStyles.medDetail),
               ],
@@ -262,8 +278,10 @@ class _ReportTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(report['patientName'] ?? 'Patient',
-                    style: AppTextStyles.medName),
+                Text(
+                  report['patientName'] ?? 'Patient',
+                  style: AppTextStyles.medName,
+                ),
                 const SizedBox(height: 4),
                 Text(
                   isUploaded
@@ -339,9 +357,7 @@ class _TrendComparisonCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             row.patientName,
-                            style: AppTextStyles.medName.copyWith(
-                              fontSize: 14,
-                            ),
+                            style: AppTextStyles.medName.copyWith(fontSize: 14),
                           ),
                         ),
                         AppBadge(
@@ -381,8 +397,10 @@ class _TrendComparisonCard extends StatelessWidget {
 
   List<_TrendRow> _trendRows() {
     final byPatient = <String, List<Map<String, dynamic>>>{};
-    for (final report in reports.where((report) =>
-        report['archived'] != true && report['reportType'] != 'uploaded')) {
+    for (final report in reports.where(
+      (report) =>
+          report['archived'] != true && report['reportType'] != 'uploaded',
+    )) {
       final patientId = '${report['patientId'] ?? report['patientName']}';
       byPatient.putIfAbsent(patientId, () => []).add(report);
     }
@@ -394,12 +412,14 @@ class _TrendComparisonCard extends StatelessWidget {
       if (patientReports.length < 2) continue;
       final first = _rate(patientReports.first);
       final latest = _rate(patientReports.last);
-      rows.add(_TrendRow(
-        patientName: patientReports.last['patientName'] ?? 'Patient',
-        firstRate: first,
-        latestRate: latest,
-        count: patientReports.length,
-      ));
+      rows.add(
+        _TrendRow(
+          patientName: patientReports.last['patientName'] ?? 'Patient',
+          firstRate: first,
+          latestRate: latest,
+          count: patientReports.length,
+        ),
+      );
     }
     rows.sort((a, b) => a.latestRate.compareTo(b.latestRate));
     return rows.take(4).toList();
@@ -455,8 +475,10 @@ class _PatientTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(patient['name'] ?? 'Patient',
-                    style: AppTextStyles.medName),
+                Text(
+                  patient['name'] ?? 'Patient',
+                  style: AppTextStyles.medName,
+                ),
                 Text(patient['phone'] ?? '', style: AppTextStyles.medDetail),
               ],
             ),

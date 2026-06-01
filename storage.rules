@@ -11,7 +11,11 @@ service firebase.storage {
         && request.auth.uid == patientUid
         && request.resource.size < 10 * 1024 * 1024;
 
-      allow read: if signedIn();
+      allow read: if signedIn()
+        && (
+          request.auth.uid == patientUid
+          || resource.metadata.recipientId == request.auth.uid
+        );
     }
 
     match /{allPaths=**} {

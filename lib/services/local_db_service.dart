@@ -182,7 +182,7 @@ class LocalDbService {
         passwordHash TEXT NOT NULL,
         dateOfBirth TEXT,
         chronicCondition TEXT,
-        arabicMode INTEGER DEFAULT 0,
+        arabicMode INTEGER DEFAULT 1,
         largeFonts INTEGER DEFAULT 0,
         highContrast INTEGER DEFAULT 0,
         caregiverAlertsEnabled INTEGER DEFAULT 1,
@@ -337,7 +337,8 @@ class LocalDbService {
             : null,
         chronicCondition: row['chronicCondition'],
         caregivers: caregivers,
-        arabicMode: row['arabicMode'] == 1,
+        arabicMode:
+            row['arabicMode'] == null ? true : row['arabicMode'] == 1,
         largeFonts: row['largeFonts'] == 1,
         highContrast: row['highContrast'] == 1,
         caregiverAlertsEnabled: row['caregiverAlertsEnabled'] == 1,

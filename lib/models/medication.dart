@@ -1,4 +1,4 @@
-// Medication model — standalone version.
+﻿// Medication model — standalone version.
 // The patient creates and owns all their medication records directly.
 
 enum ReminderType { notification, alarm }
@@ -117,13 +117,12 @@ class Medication {
   String get frequencyLabelAr {
     final n = reminderTimes.length;
     return switch (n) {
-      1 => 'مرة يومياً',
-      2 => 'مرتين يومياً',
-      3 => '3 مرات يومياً',
-      _ => '$n مرات يومياً',
+      1 => 'مرة يوميا',
+      2 => 'مرتين يوميا',
+      3 => '3 مرات يوميا',
+      _ => '$n مرات يوميا',
     };
   }
-
   Map<String, dynamic> toMap() => {
         'id': id,
         'name': name,
@@ -203,3 +202,4 @@ class Medication {
         notesAr: notesAr ?? this.notesAr,
       );
 }
+

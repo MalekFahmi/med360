@@ -315,9 +315,9 @@ function missedDosePayload({dose, caregiverUid, notificationId, now}) {
     sentAt: admin.firestore.FieldValue.serverTimestamp(),
     channel: "both",
     acknowledged: false,
-    title: isArabic ? "Missed Medication Alert" : "Missed Medication Alert",
+    title: isArabic ? "تنبيه جرعة فائتة" : "Missed Medication Alert",
     body: isArabic ?
-      `${patientName} missed ${medicationName}.` :
+      `${patientName} فاتته جرعة ${medicationName}.` :
       `${patientName} missed ${medicationName}.`,
     language: String(dose.language || "en"),
     type: "missedDose",

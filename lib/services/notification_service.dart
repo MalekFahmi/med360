@@ -6,9 +6,17 @@ import 'package:timezone/timezone.dart' as tz;
 import '../models/models.dart';
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
+  NotificationService._();
+  static final NotificationService _instance = NotificationService._();
   factory NotificationService() => _instance;
-  NotificationService._internal();
+
+  static const actionTakeMedication = 'take_medication';
+  static const actionSnoozeMedication = 'snooze_medication';
+  static const actionDismissMedication = 'dismiss_medication';
+
+  static const _reminderChannelId = 'med360_reminders';
+  static const _alarmChannelId = 'med360_alarms_v2';
+  static const _caregiverChannelId = 'med360_caregiver_alerts';
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -16,31 +24,26 @@ class NotificationService {
   ValueChanged<NotificationResponse>? _responseHandler;
   bool _initialized = false;
 
-  static const actionTakeMedication = 'take_medication';
-  static const actionSnoozeMedication = 'snooze_medication';
-  static const actionDismissMedication = 'dismiss_medication';
-
   Future<void> init() async {
     if (_initialized) return;
 
     tz_data.initializeTimeZones();
-    tz.setLocalLocation(tz.getLocation('Africa/Tripoli'));
-
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings(
+    try {
+      tz.setLocalLocation(tz.getLocation('Africa/Tripoli'));
+    } catch (_) {
+      // Keep the package default if the bundled timezone database is unavailable.
+    }
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const ios = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
       requestSoundPermission: false,
     );
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
 
     await _plugin.initialize(
-      settings: initSettings,
+      settings: const InitializationSettings(android: android, iOS: ios),
       onDidReceiveNotificationResponse: _handleNotificationResponse,
+      onDidReceiveBackgroundNotificationResponse: _backgroundResponseHandler,
     );
     await _createAndroidChannels();
     _initialized = true;
@@ -51,60 +54,66 @@ class NotificationService {
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
-    debugPrint(
-      'Notification action=${response.actionId} payload=${response.payload}',
-    );
     _responseHandler?.call(response);
   }
 
   Future<void> _createAndroidChannels() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
+    if (kIsWeb) return;
+
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    if (android == null) return;
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      'med360_reminders',
-      'Medication Reminders',
-      description: 'Notifications for medication schedules',
-      importance: Importance.max,
-    ));
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      'med360_alarms',
-      'Medication Alarms',
-      description: 'Alarm-style reminders for medication schedules',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
-    ));
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      'med360_caregiver_alerts',
-      'Caregiver Alerts',
-      description: 'Alerts sent when a patient misses a dose',
-      importance: Importance.max,
-    ));
+    if (androidPlugin == null) return;
+
+    await androidPlugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _reminderChannelId,
+        'Medication reminders',
+        description: 'Medication reminder notifications',
+        importance: Importance.high,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
+
+    await androidPlugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _alarmChannelId,
+        'Medication alarms',
+        description: 'Full-screen medication alarms',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        audioAttributesUsage: AudioAttributesUsage.alarm,
+      ),
+    );
+
+    await androidPlugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _caregiverChannelId,
+        'Caregiver alerts',
+        description: 'Alerts for caregivers when patient doses are missed',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
   }
 
   Future<void> requestPermissions() async {
     if (kIsWeb) return;
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
+    await androidPlugin?.requestExactAlarmsPermission();
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestExactAlarmsPermission();
+    final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    await iosPlugin?.requestPermissions(alert: true, badge: true, sound: true);
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
-
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            MacOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
+    final macPlugin = _plugin.resolvePlatformSpecificImplementation<
+        MacOSFlutterLocalNotificationsPlugin>();
+    await macPlugin?.requestPermissions(alert: true, badge: true, sound: true);
   }
 
   Future<void> scheduleMedicationReminders(
@@ -115,56 +124,15 @@ class NotificationService {
 
     await cancelMedicationReminders(med);
 
+    final isAlarm = med.reminderType == ReminderType.alarm;
     for (final time in med.reminderTimes) {
-      final id = _notificationId(med.id, time, 'initial');
-      final isAlarm = med.reminderType == ReminderType.alarm;
-
+      final scheduled = _nextInstanceOfTime(time.hour, time.minute);
       await _plugin.zonedSchedule(
-        id: id,
-        title: isArabic ? 'تذكير بالدواء' : 'Medication Reminder',
-        body: isArabic
-            ? 'حان وقت تناول ${med.nameAr} (${med.dosage})'
-            : 'Time to take ${med.name} (${med.dosage})',
-        scheduledDate: _nextInstanceOfTime(time.hour, time.minute),
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            isAlarm ? 'med360_alarms' : 'med360_reminders',
-            isAlarm ? 'Medication Alarms' : 'Medication Reminders',
-            channelDescription: isAlarm
-                ? 'Alarm-style reminders for medication schedules'
-                : 'Notifications for medication schedules',
-            category: AndroidNotificationCategory.alarm,
-            importance: Importance.max,
-            priority: Priority.high,
-            playSound: true,
-            enableVibration: true,
-            fullScreenIntent: isAlarm,
-            actions: isAlarm
-                ? const [
-                    AndroidNotificationAction(
-                      actionTakeMedication,
-                      'Take Medication',
-                      showsUserInterface: true,
-                    ),
-                    AndroidNotificationAction(
-                      actionSnoozeMedication,
-                      'Snooze 5 min',
-                      showsUserInterface: true,
-                    ),
-                    AndroidNotificationAction(
-                      actionDismissMedication,
-                      'Dismiss',
-                      cancelNotification: true,
-                    ),
-                  ]
-                : null,
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentSound: true,
-            presentBadge: true,
-          ),
-        ),
+        id: _notificationId(med.id, time, 'initial'),
+        title: isAlarm ? 'Medication Alarm' : 'Medication Reminder',
+        body: _medicationBody(med, isArabic: isArabic),
+        scheduledDate: scheduled,
+        notificationDetails: _medicationDetails(isAlarm: isAlarm),
         androidScheduleMode: isAlarm
             ? AndroidScheduleMode.alarmClock
             : AndroidScheduleMode.exactAllowWhileIdle,
@@ -180,34 +148,20 @@ class NotificationService {
   }) async {
     if (kIsWeb || !dose.isPending) return;
 
-    final secondReminderAt =
-        _scheduledDateTime(dose).add(const Duration(minutes: 5));
-    if (!secondReminderAt.isAfter(DateTime.now())) return;
+    final scheduled = tz.TZDateTime.from(
+      _scheduledDateTime(dose).add(const Duration(minutes: 5)),
+      tz.local,
+    );
+    if (!scheduled.isAfter(tz.TZDateTime.now(tz.local))) return;
 
     await _plugin.zonedSchedule(
       id: _doseNotificationId(dose.id, 'second'),
-      title: isArabic ? 'تذكير ثان' : 'Second Medication Reminder',
+      title: isArabic ? 'تذكير ثان' : 'Second Reminder',
       body: isArabic
-          ? 'لم يتم تأكيد جرعة ${dose.medicationName} بعد.'
-          : '${dose.medicationName} has not been marked as taken yet.',
-      scheduledDate: tz.TZDateTime.from(secondReminderAt, tz.local),
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'med360_reminders',
-          'Medication Reminders',
-          channelDescription: 'Notifications for medication schedules',
-          category: AndroidNotificationCategory.reminder,
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-          enableVibration: true,
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          presentBadge: true,
-        ),
-      ),
+          ? 'ما زال وقت تناول ${dose.medicationName} متاحا.'
+          : 'Still time to take ${dose.medicationName}.',
+      scheduledDate: scheduled,
+      notificationDetails: _reminderDetails(),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       payload: '${dose.id}:second',
     );
@@ -219,49 +173,16 @@ class NotificationService {
     required bool isArabic,
   }) async {
     if (kIsWeb) return;
-    final scheduledAt = DateTime.now().add(const Duration(minutes: 5));
+
+    final scheduled = tz.TZDateTime.now(
+      tz.local,
+    ).add(const Duration(minutes: 5));
     await _plugin.zonedSchedule(
       id: _notificationId(med.id, time, 'snooze'),
-      title: isArabic ? 'ØªØ°ÙƒÙŠØ± Ø¨Ø§Ù„Ø¯ÙˆØ§Ø¡' : 'Medication Reminder',
-      body: isArabic
-          ? 'Ø­Ø§Ù† ÙˆÙ‚Øª ØªÙ†Ø§ÙˆÙ„ ${med.nameAr} (${med.dosage})'
-          : 'Time to take ${med.name} (${med.dosage})',
-      scheduledDate: tz.TZDateTime.from(scheduledAt, tz.local),
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'med360_alarms',
-          'Medication Alarms',
-          channelDescription: 'Alarm-style reminders for medication schedules',
-          category: AndroidNotificationCategory.alarm,
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-          enableVibration: true,
-          fullScreenIntent: true,
-          actions: [
-            AndroidNotificationAction(
-              actionTakeMedication,
-              'Take Medication',
-              showsUserInterface: true,
-            ),
-            AndroidNotificationAction(
-              actionSnoozeMedication,
-              'Snooze 5 min',
-              showsUserInterface: true,
-            ),
-            AndroidNotificationAction(
-              actionDismissMedication,
-              'Dismiss',
-              cancelNotification: true,
-            ),
-          ],
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          presentBadge: true,
-        ),
-      ),
+      title: 'Medication Alarm',
+      body: _medicationBody(med, isArabic: isArabic),
+      scheduledDate: scheduled,
+      notificationDetails: _medicationDetails(isAlarm: true),
       androidScheduleMode: AndroidScheduleMode.alarmClock,
       payload: _medicationPayload(med.id, time),
     );
@@ -275,25 +196,12 @@ class NotificationService {
     if (kIsWeb) return;
 
     await _plugin.show(
-      id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      id: '$patientName-$medicationName-caregiver'.hashCode.abs(),
       title: isArabic ? 'تنبيه جرعة فائتة' : 'Missed dose alert',
       body: isArabic
-          ? 'فاتت جرعة $medicationName للمريض $patientName'
-          : '$patientName missed $medicationName',
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'med360_caregiver_alerts',
-          'Caregiver Alerts',
-          channelDescription: 'Alerts sent when a patient misses a dose',
-          importance: Importance.max,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          presentBadge: true,
-        ),
-      ),
+          ? '$patientName فاتته جرعة $medicationName.'
+          : '$patientName missed $medicationName.',
+      notificationDetails: _caregiverDetails(),
     );
   }
 
@@ -309,38 +217,117 @@ class NotificationService {
         const ReminderTime(hour: 0, minute: 0),
         'refill',
       ),
-      title: isArabic ? 'Refill reminder' : 'Refill reminder',
-      body:
-          '${medication.displayName} has ${medication.estimatedDaysRemaining.toStringAsFixed(1)} days remaining.',
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'med360_reminders',
-          'Medication Reminders',
-          channelDescription: 'Notifications for medication schedules',
-          category: AndroidNotificationCategory.reminder,
-          importance: Importance.max,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          presentBadge: true,
-        ),
-      ),
+      title: isArabic ? 'تذكير إعادة التعبئة' : 'Refill reminder',
+      body: isArabic
+          ? '${medication.displayNameAr} متبق له ${medication.estimatedDaysRemaining.ceil()} يوم.'
+          : '${medication.displayName} has ${medication.estimatedDaysRemaining.ceil()} days remaining.',
+      notificationDetails: _reminderDetails(),
     );
   }
 
   Future<void> cancelMedicationReminders(Medication med) async {
     if (kIsWeb) return;
-
     for (final time in med.reminderTimes) {
       await _plugin.cancel(id: _notificationId(med.id, time, 'initial'));
+      await _plugin.cancel(id: _notificationId(med.id, time, 'snooze'));
     }
   }
 
   Future<void> cancelDoseEscalation(DoseConfirmation dose) async {
     if (kIsWeb) return;
     await _plugin.cancel(id: _doseNotificationId(dose.id, 'second'));
+  }
+
+  NotificationDetails _medicationDetails({required bool isAlarm}) {
+    if (!isAlarm) return _reminderDetails();
+
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        _alarmChannelId,
+        'Medication alarms',
+        channelDescription: 'Full-screen medication alarms',
+        importance: Importance.max,
+        priority: Priority.max,
+        category: AndroidNotificationCategory.alarm,
+        fullScreenIntent: true,
+        ongoing: true,
+        autoCancel: false,
+        playSound: true,
+        enableVibration: true,
+        audioAttributesUsage: AudioAttributesUsage.alarm,
+        additionalFlags: Int32List.fromList(const <int>[4]),
+        actions: const <AndroidNotificationAction>[
+          AndroidNotificationAction(
+            actionTakeMedication,
+            'Taken',
+            showsUserInterface: true,
+            cancelNotification: true,
+          ),
+          AndroidNotificationAction(
+            actionSnoozeMedication,
+            'Snooze 5 min',
+            showsUserInterface: true,
+            cancelNotification: true,
+          ),
+          AndroidNotificationAction(
+            actionDismissMedication,
+            'Dismiss',
+            showsUserInterface: false,
+            cancelNotification: true,
+          ),
+        ],
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+  }
+
+  NotificationDetails _reminderDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        _reminderChannelId,
+        'Medication reminders',
+        channelDescription: 'Medication reminder notifications',
+        importance: Importance.high,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.reminder,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+  }
+
+  NotificationDetails _caregiverDetails() {
+    return const NotificationDetails(
+      android: AndroidNotificationDetails(
+        _caregiverChannelId,
+        'Caregiver alerts',
+        channelDescription:
+            'Alerts for caregivers when patient doses are missed',
+        importance: Importance.max,
+        priority: Priority.max,
+        category: AndroidNotificationCategory.message,
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+  }
+
+  String _medicationBody(Medication med, {required bool isArabic}) {
+    final name =
+        isArabic && med.nameAr.trim().isNotEmpty ? med.nameAr : med.name;
+    return isArabic
+        ? 'حان وقت تناول $name (${med.dosage}).'
+        : 'Time to take $name (${med.dosage}).';
   }
 
   int _notificationId(String medicationId, ReminderTime time, String stage) =>
@@ -369,15 +356,16 @@ class NotificationService {
   }
 
   DateTime _scheduledDateTime(DoseConfirmation dose) {
-    final parts = dose.scheduledTime.split(':');
-    final hour = int.tryParse(parts.first) ?? 0;
-    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    final time = ReminderTime.fromString(dose.scheduledTime);
     return DateTime(
       dose.scheduledDate.year,
       dose.scheduledDate.month,
       dose.scheduledDate.day,
-      hour,
-      minute,
+      time.hour,
+      time.minute,
     );
   }
 }
+
+@pragma('vm:entry-point')
+void _backgroundResponseHandler(NotificationResponse response) {}

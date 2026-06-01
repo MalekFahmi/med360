@@ -33,7 +33,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isCaregiver => _role == AccountRole.caregiver;
   bool get isDoctor => _role == AccountRole.doctor;
 
-  bool get arabicMode => _patient?.arabicMode ?? true;
+  bool get arabicMode => true;
   bool get largeFonts => _patient?.largeFonts ?? false;
   bool get highContrast => _patient?.highContrast ?? false;
   bool get caregiverAlertsEnabled => _patient?.caregiverAlertsEnabled ?? true;
@@ -66,7 +66,9 @@ class AuthProvider extends ChangeNotifier {
       final firebasePatient = await backend.currentPatient();
       if (firebasePatient != null) {
         final localPatient = await _db.getPatientById(firebasePatient.id);
-        final patient = localPatient ?? firebasePatient;
+        final patient = (localPatient ?? firebasePatient).copyWith(
+          arabicMode: true,
+        );
         if (localPatient == null) {
           await _db.insertPatient(patient);
         }
@@ -147,7 +149,11 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       await _db.insertPatient(newPatient);
-      await FirebaseBackendService().registerPatientDevice(newPatient);
+      try {
+        await FirebaseBackendService().registerPatientDevice(newPatient);
+      } catch (e) {
+        debugPrint('Patient device registration skipped after signup: $e');
+      }
       _patient = newPatient;
       _caregiver = null;
       _doctor = null;
@@ -177,7 +183,8 @@ class AuthProvider extends ChangeNotifier {
     try {
       final backend = FirebaseBackendService();
       PatientUser? p = await _db.getPatientByPhone(phone);
-      if (p != null && p.passwordHash != _hashPassword(password)) {
+      final hasLocalPassword = p != null && p.passwordHash.isNotEmpty;
+      if (hasLocalPassword && p.passwordHash != _hashPassword(password)) {
         _errorMessage = 'Incorrect phone number or password.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
@@ -206,9 +213,13 @@ class AuthProvider extends ChangeNotifier {
       );
       final cloudPatient =
           await backend.currentPatient(passwordHash: _hashPassword(password));
-      p = cloudPatient ?? p;
+      p = (cloudPatient ?? p).copyWith(arabicMode: true);
       await _db.insertPatient(p);
-      await backend.registerPatientDevice(p);
+      try {
+        await backend.registerPatientDevice(p);
+      } catch (e) {
+        debugPrint('Patient device registration skipped after login: $e');
+      }
       _linkedDoctors = await backend.fetchDoctorsForCurrentPatient();
       _patient = p;
       _caregiver = null;
@@ -276,7 +287,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _errorMessage =
+          _friendlyAuthError(e, fallback: 'Caregiver sign up failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -306,7 +318,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _errorMessage =
+          _friendlyAuthError(e, fallback: 'Caregiver login failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -350,7 +363,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _errorMessage = _friendlyAuthError(e, fallback: 'Doctor sign up failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -380,7 +393,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _errorMessage = _friendlyAuthError(e, fallback: 'Doctor login failed.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -391,6 +404,12 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _saveAndNotify(PatientUser updated) async {
     _patient = updated;
     await _db.updatePatient(updated);
+    try {
+      await FirebaseBackendService().updateCurrentPatientProfile(updated);
+    } catch (e) {
+      debugPrint('Patient profile cloud sync failed: $e');
+      rethrow;
+    }
     notifyListeners();
   }
 
@@ -503,7 +522,9 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Could not link doctor. Please try again.';
+      debugPrint('Doctor link failed: $e');
+      _errorMessage =
+          'Could not link doctor. Please try again after Firestore rules are updated.';
       notifyListeners();
       return false;
     }
@@ -548,10 +569,16 @@ class AuthProvider extends ChangeNotifier {
     if (raw.contains('email-already-in-use')) {
       return 'This account already exists. Try logging in.';
     }
+    if (raw.contains('phone number is already registered')) {
+      return 'This phone number is already registered. Please log in with the original password.';
+    }
+    if (raw.contains('too-many-requests')) {
+      return 'Firebase temporarily blocked requests from this device. Wait a few minutes, then try again.';
+    }
     if (raw.contains('invalid-credential') ||
         raw.contains('wrong-password') ||
         raw.contains('user-not-found')) {
-      return 'Incorrect phone number or password.';
+      return 'Incorrect credentials.';
     }
     if (raw.contains('network-request-failed')) {
       return 'Network error. Check your connection and try again.';

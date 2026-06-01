@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 
@@ -53,13 +54,19 @@ class Med360App extends StatelessWidget {
           return MaterialApp(
             title: 'MED360',
             debugShowCheckedModeBanner: false,
-            locale: auth.arabicMode
-                ? const Locale('ar', 'LY')
-                : const Locale('en', 'US'),
+            locale: const Locale('ar', 'LY'),
+            supportedLocales: const [
+              Locale('ar', 'LY'),
+              Locale('en', 'US'),
+            ],
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             builder: (context, child) {
               return Directionality(
-                textDirection:
-                    auth.arabicMode ? TextDirection.rtl : TextDirection.ltr,
+                textDirection: TextDirection.rtl,
                 child: child!,
               );
             },
@@ -192,39 +199,43 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final auth = context.read<AuthProvider>();
 
     if (auth.patient != null) {
-      final pId = auth.patient!.id;
-      final medicationProvider = context.read<MedicationProvider>();
-      final adherenceProvider = context.read<AdherenceProvider>();
-      final reportProvider = context.read<ReportProvider>();
+      try {
+        final pId = auth.patient!.id;
+        final medicationProvider = context.read<MedicationProvider>();
+        final adherenceProvider = context.read<AdherenceProvider>();
+        final reportProvider = context.read<ReportProvider>();
 
-      await FirebaseBackendService().registerPatientDevice(auth.patient!);
-      await FirebaseBackendService().logUserEngagementEvent(
-        patientId: pId,
-        eventType: 'dailyAppUsage',
-        source: 'appOpen',
-        details: {
-          'role': 'patient',
-          'openedAt': DateTime.now().toIso8601String(),
-        },
-      );
-      await NotificationService().requestPermissions();
-      await medicationProvider.loadMedications(pId);
-      final meds = medicationProvider.medications;
-      await adherenceProvider.loadAndGenerate(
-        patientId: pId,
-        medications: meds,
-        patientName: auth.patient!.name,
-        caregivers: auth.caregivers,
-        caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-        isArabic: auth.arabicMode,
-      );
-      await _markOverdueDosesAndNotify();
-      _startAutoMissedTimer();
-      if (!mounted) return;
-      reportProvider.buildReports(
-        allDoses: adherenceProvider.allDoses,
-        medications: meds,
-      );
+        await FirebaseBackendService().registerPatientDevice(auth.patient!);
+        await FirebaseBackendService().logUserEngagementEvent(
+          patientId: pId,
+          eventType: 'dailyAppUsage',
+          source: 'appOpen',
+          details: {
+            'role': 'patient',
+            'openedAt': DateTime.now().toIso8601String(),
+          },
+        );
+        await NotificationService().requestPermissions();
+        await medicationProvider.loadMedications(pId);
+        final meds = medicationProvider.medications;
+        await adherenceProvider.loadAndGenerate(
+          patientId: pId,
+          medications: meds,
+          patientName: auth.patient!.name,
+          caregivers: auth.caregivers,
+          caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+          isArabic: auth.arabicMode,
+        );
+        await _markOverdueDosesAndNotify();
+        _startAutoMissedTimer();
+        if (!mounted) return;
+        reportProvider.buildReports(
+          allDoses: adherenceProvider.allDoses,
+          medications: meds,
+        );
+      } catch (e) {
+        debugPrint('Patient shell load skipped: $e');
+      }
     }
   }
 
@@ -283,6 +294,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           medication.copyWith(
             quantityRemaining: medication.quantityRemaining - 1,
           ),
+          isArabic: auth.arabicMode,
         );
       }
       return;
@@ -321,6 +333,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         },
       );
     }
+  }
+
+  void _rebuildReportsAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ReportProvider>().buildReports(
+            allDoses: context.read<AdherenceProvider>().allDoses,
+            medications: context.read<MedicationProvider>().medications,
+          );
+    });
   }
 
   void _startAutoMissedTimer() {
@@ -385,31 +407,35 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isAr = context.watch<AuthProvider>().arabicMode;
-    if (_currentIndex == 2) {
-      context.read<ReportProvider>().buildReports(
-            allDoses: context.read<AdherenceProvider>().allDoses,
-            medications: context.read<MedicationProvider>().medications,
-          );
-    }
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        onDestinationSelected: (i) {
+          setState(() => _currentIndex = i);
+          if (i == 2) _rebuildReportsAfterFrame();
+        },
         destinations: [
           NavigationDestination(
-              icon: const Icon(Icons.home), label: isAr ? 'الرئيسية' : 'Home'),
+            icon: const Icon(Icons.home),
+            label: isAr ? 'الرئيسية' : 'Home',
+          ),
           NavigationDestination(
-              icon: const Icon(Icons.medication),
-              label: isAr ? 'أدويتي' : 'Meds'),
+            icon: const Icon(Icons.medication),
+            label: isAr ? 'أدويتي' : 'Meds',
+          ),
           NavigationDestination(
-              icon: const Icon(Icons.bar_chart),
-              label: isAr ? 'التقارير' : 'Reports'),
+            icon: const Icon(Icons.bar_chart),
+            label: isAr ? 'التقارير' : 'Reports',
+          ),
           NavigationDestination(
-              icon: const Icon(Icons.people), label: isAr ? 'الرعاية' : 'Care'),
+            icon: const Icon(Icons.people),
+            label: isAr ? 'الرعاية' : 'Care',
+          ),
           NavigationDestination(
-              icon: const Icon(Icons.settings),
-              label: isAr ? 'إعدادات' : 'Settings'),
+            icon: const Icon(Icons.settings),
+            label: isAr ? 'الإعدادات' : 'Settings',
+          ),
         ],
       ),
     );

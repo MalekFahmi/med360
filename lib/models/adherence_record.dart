@@ -1,4 +1,4 @@
-class AdherenceRecord {
+﻿class AdherenceRecord {
   final String medicationId;
   final String medicationName;
   final int year;
@@ -29,9 +29,9 @@ class AdherenceRecord {
 
   String get adherenceLabel {
     final p = adherenceRate * 100;
-    if (p >= 80) return 'Good';
-    if (p >= 60) return 'Fair';
-    return 'Poor';
+    if (p >= 80) return 'جيد';
+    if (p >= 60) return 'مقبول';
+    return 'ضعيف';
   }
 
   String get adherenceLabelAr {
@@ -66,9 +66,9 @@ class MonthlyAdherenceSummary {
 
   String get adherenceLabel {
     final p = overallAdherenceRate * 100;
-    if (p >= 80) return 'Good';
-    if (p >= 60) return 'Fair';
-    return 'Poor';
+    if (p >= 80) return 'جيد';
+    if (p >= 60) return 'مقبول';
+    return 'ضعيف';
   }
 
   String get monthLabel {
@@ -104,8 +104,8 @@ class MonthlyAdherenceSummary {
       'سبتمبر',
       'أكتوبر',
       'نوفمبر',
-      'ديسمبر'
-    ];
+      'ديسمبر'    ];
     return '${m[month]} $year';
   }
 }
+

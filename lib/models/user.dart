@@ -177,7 +177,7 @@ class PatientUser {
         caregivers: (m['caregivers'] as List? ?? [])
             .map((c) => Caregiver.fromMap(c))
             .toList(),
-        arabicMode: m['arabicMode'] ?? false,
+        arabicMode: m['arabicMode'] ?? true,
         largeFonts: m['largeFonts'] ?? false,
         highContrast: m['highContrast'] ?? false,
         caregiverAlertsEnabled: m['caregiverAlertsEnabled'] ?? true,

@@ -39,15 +39,21 @@ service cloud.firestore {
         && currentUserData().role == "doctor";
     }
 
-    // Patient ownership is determined by the Firebase Auth UID document.
+    // Patient ownership is primarily the Firebase Auth UID path. The ownerUid
+    // fallback keeps older patient documents working after migration.
     function isPatientOwner(patientUid) {
       return signedIn()
-        && exists(
-          /databases/$(database)/documents/patients/$(patientUid)
-        )
-        && get(
-          /databases/$(database)/documents/patients/$(patientUid)
-        ).data.ownerUid == request.auth.uid;
+        && (
+          patientUid == request.auth.uid
+          || (
+            exists(
+              /databases/$(database)/documents/patients/$(patientUid)
+            )
+            && get(
+              /databases/$(database)/documents/patients/$(patientUid)
+            ).data.ownerUid == request.auth.uid
+          )
+        );
     }
 
     function isLinkedCaregiver(patientUid) {
@@ -140,7 +146,8 @@ service cloud.firestore {
       }
 
       match /doctors/{doctorUid} {
-        allow read: if isPatientOwner(patientUid)
+        allow read: if (signedIn() && patientUid == request.auth.uid)
+          || isPatientOwner(patientUid)
           || request.auth.uid == doctorUid;
 
         allow create, update, delete: if isPatientOwner(patientUid);
@@ -179,7 +186,9 @@ service cloud.firestore {
 
     match /patientCaregivers/{relationshipId} {
 
-      allow read: if signedIn();
+      allow read: if isPatientOwner(resource.data.patientUid)
+        || request.auth.uid == resource.data.caregiverUid
+        || isLinkedDoctor(resource.data.patientUid);
 
       allow create, update:
         if isPatientOwner(
@@ -201,7 +210,9 @@ service cloud.firestore {
     }
 
     match /patientDoctorRelations/{relationshipId} {
-      allow read: if signedIn();
+      allow read: if isPatientOwner(resource.data.patientUid)
+        || request.auth.uid == resource.data.doctorId
+        || isLinkedCaregiver(resource.data.patientUid);
 
       allow create, update:
         if isPatientOwner(
@@ -215,18 +226,38 @@ service cloud.firestore {
     }
 
     match /adherenceEvents/{eventId} {
-      allow create: if signedIn();
-      allow read: if isPatient()
-        || isCaregiverUser()
-        || isDoctorUser();
+      allow create: if signedIn()
+        && request.resource.data.actorUid == request.auth.uid
+        && (
+          (
+            request.resource.data.patientUid is string
+            && canManagePatient(request.resource.data.patientUid)
+          )
+          || (
+            request.resource.data.eventCategory == "userEngagement"
+            && !("patientId" in request.resource.data)
+            && !("patientUid" in request.resource.data)
+          )
+        );
+      allow read: if signedIn()
+        && (
+          resource.data.actorUid == request.auth.uid
+          || (
+            resource.data.patientUid is string
+            && canManagePatient(resource.data.patientUid)
+          )
+        );
       allow update, delete: if false;
     }
 
     match /medicationChangeLogs/{eventId} {
-      allow create: if signedIn();
-      allow read: if isPatient()
-        || isCaregiverUser()
-        || isDoctorUser();
+      allow create: if signedIn()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.patientUid is string
+        && canManagePatient(request.resource.data.patientUid);
+      allow read: if signedIn()
+        && resource.data.patientUid is string
+        && canManagePatient(resource.data.patientUid);
       allow update, delete: if false;
     }
 
@@ -246,7 +277,10 @@ service cloud.firestore {
         if isCaregiverUser()
         && request.auth.uid == caregiverUid;
 
-      allow create: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.patientUid is string
+        && request.resource.data.recipientId == caregiverUid
+        && isPatientOwner(request.resource.data.patientUid);
 
       allow delete: if false;
     }
@@ -257,7 +291,10 @@ service cloud.firestore {
         if isDoctorUser()
         && request.auth.uid == doctorUid;
 
-      allow create: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.patientUid is string
+        && request.resource.data.recipientId == doctorUid
+        && isPatientOwner(request.resource.data.patientUid);
 
       allow delete: if false;
     }

@@ -47,7 +47,11 @@ class MedicationProvider extends ChangeNotifier {
   }
 
   // ── Patient adds a new medication ─────────────────────────────────────────
-  Future<void> addMedication(String patientId, Medication med) async {
+  Future<void> addMedication(
+    String patientId,
+    Medication med, {
+    bool isArabic = true,
+  }) async {
     await _db.insertMedication(patientId, med);
     await _db.logMedicationChange(
       patientId: patientId,
@@ -55,28 +59,22 @@ class MedicationProvider extends ChangeNotifier {
       action: 'created',
       actorRole: 'patient',
     );
-    await _handleRefillMilestone(patientId, med);
-    await FirebaseBackendService().logMedicationModification(
+    await _handleRefillMilestone(patientId, med, isArabic: isArabic);
+    _medications = [..._medications, med];
+    notifyListeners();
+    await _syncMedicationCloudSideEffects(
       patientId: patientId,
       medication: med,
       action: 'created',
-      actorRole: 'patient',
     );
-    final patientUid = FirebaseBackendService().currentUid;
-    if (patientUid != null) {
-      await FirebaseBackendService().upsertPatientMedication(
-        patientUid: patientUid,
-        patientId: patientId,
-        medication: med,
-        actorRole: 'patient',
-      );
-    }
-    _medications = [..._medications, med];
-    notifyListeners();
   }
 
   // ── Patient edits a medication ────────────────────────────────────────────
-  Future<void> updateMedication(String patientId, Medication med) async {
+  Future<void> updateMedication(
+    String patientId,
+    Medication med, {
+    bool isArabic = true,
+  }) async {
     final previous = findById(med.id);
     await _db.updateMedication(patientId, med);
     await _db.logMedicationChange(
@@ -85,7 +83,7 @@ class MedicationProvider extends ChangeNotifier {
       action: 'updated',
       actorRole: 'patient',
     );
-    await _handleRefillMilestone(patientId, med);
+    await _handleRefillMilestone(patientId, med, isArabic: isArabic);
     if (previous != null &&
         previous.needsRefill &&
         med.quantityRemaining > previous.quantityRemaining &&
@@ -96,23 +94,13 @@ class MedicationProvider extends ChangeNotifier {
         medication: med,
       );
     }
-    await FirebaseBackendService().logMedicationModification(
+    _medications = _medications.map((m) => m.id == med.id ? med : m).toList();
+    notifyListeners();
+    await _syncMedicationCloudSideEffects(
       patientId: patientId,
       medication: med,
       action: 'updated',
-      actorRole: 'patient',
     );
-    final patientUid = FirebaseBackendService().currentUid;
-    if (patientUid != null) {
-      await FirebaseBackendService().upsertPatientMedication(
-        patientUid: patientUid,
-        patientId: patientId,
-        medication: med,
-        actorRole: 'patient',
-      );
-    }
-    _medications = _medications.map((m) => m.id == med.id ? med : m).toList();
-    notifyListeners();
   }
 
   // ── Patient deletes a medication ──────────────────────────────────────────
@@ -136,45 +124,47 @@ class MedicationProvider extends ChangeNotifier {
     await updateMedication(patientId, updated);
   }
 
-  Future<void> _handleRefillMilestone(
-    String patientId,
-    Medication medication,
-  ) async {
-    final milestone = _refillMilestoneFor(medication);
-    if (milestone == null) return;
+  Future<void> _handleRefillMilestone(String patientId, Medication medication,
+      {required bool isArabic}) async {
+    try {
+      final milestone = _refillMilestoneFor(medication);
+      if (milestone == null) return;
 
-    final alreadySent = await _db.hasRefillEventForMilestone(
-      patientId: patientId,
-      medicationId: medication.id,
-      milestone: milestone,
-    );
-    if (alreadySent) return;
+      final alreadySent = await _db.hasRefillEventForMilestone(
+        patientId: patientId,
+        medicationId: medication.id,
+        milestone: milestone,
+      );
+      if (alreadySent) return;
 
-    await _db.logRefillEvent(
-      patientId: patientId,
-      medication: medication,
-      milestone: milestone,
-    );
-    await NotificationService().showRefillAlert(
-      medication: medication,
-      isArabic: true,
-    );
-    await FirebaseBackendService().logReminderEvent(
-      patientId: patientId,
-      medicationId: medication.id,
-      eventType: 'refillReminder',
-      source: 'app',
-      details: {
-        'milestone': milestone,
-        'daysRemaining': medication.estimatedDaysRemaining,
-        'quantityRemaining': medication.quantityRemaining,
-      },
-    );
-    await FirebaseBackendService().sendRefillAlert(
-      patientId: patientId,
-      medication: medication,
-      milestone: milestone,
-    );
+      await _db.logRefillEvent(
+        patientId: patientId,
+        medication: medication,
+        milestone: milestone,
+      );
+      await NotificationService().showRefillAlert(
+        medication: medication,
+        isArabic: isArabic,
+      );
+      await FirebaseBackendService().logReminderEvent(
+        patientId: patientId,
+        medicationId: medication.id,
+        eventType: 'refillReminder',
+        source: 'app',
+        details: {
+          'milestone': milestone,
+          'daysRemaining': medication.estimatedDaysRemaining,
+          'quantityRemaining': medication.quantityRemaining,
+        },
+      );
+      await FirebaseBackendService().sendRefillAlert(
+        patientId: patientId,
+        medication: medication,
+        milestone: milestone,
+      );
+    } catch (e) {
+      debugPrint('Refill side effects skipped: $e');
+    }
   }
 
   int? _refillMilestoneFor(Medication medication) {
@@ -188,5 +178,32 @@ class MedicationProvider extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  Future<void> _syncMedicationCloudSideEffects({
+    required String patientId,
+    required Medication medication,
+    required String action,
+  }) async {
+    try {
+      await FirebaseBackendService().logMedicationModification(
+        patientId: patientId,
+        medication: medication,
+        action: action,
+        actorRole: 'patient',
+      );
+      final patientUid = FirebaseBackendService().currentUid;
+      if (patientUid != null) {
+        await FirebaseBackendService().upsertPatientMedication(
+          patientUid: patientUid,
+          patientId: patientId,
+          medication: medication,
+          actorRole: 'patient',
+        );
+      }
+    } catch (e) {
+      debugPrint('Medication cloud sync skipped: $e');
+      rethrow;
+    }
   }
 }

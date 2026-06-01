@@ -5,6 +5,7 @@ class CaregiverNotification {
   final String caregiverId;
   final String caregiverName;
   final String patientId;
+  final String? patientUid;
   final String patientName;
   final String? medicationId;
   final String? medicationName;
@@ -19,6 +20,7 @@ class CaregiverNotification {
     required this.caregiverId,
     required this.caregiverName,
     required this.patientId,
+    this.patientUid,
     required this.patientName,
     this.medicationId,
     this.medicationName,
@@ -34,6 +36,7 @@ class CaregiverNotification {
         'caregiverId': caregiverId,
         'caregiverName': caregiverName,
         'patientId': patientId,
+        'patientUid': patientUid,
         'patientName': patientName,
         'medicationId': medicationId,
         'medicationName': medicationName,
@@ -50,6 +53,7 @@ class CaregiverNotification {
         caregiverId: m['caregiverId'],
         caregiverName: m['caregiverName'] ?? '',
         patientId: m['patientId'] ?? '',
+        patientUid: m['patientUid'],
         patientName: m['patientName'] ?? '',
         medicationId: m['medicationId'],
         medicationName: m['medicationName'],
@@ -65,6 +69,7 @@ class CaregiverNotification {
         caregiverId: caregiverId,
         caregiverName: caregiverName,
         patientId: patientId,
+        patientUid: patientUid,
         patientName: patientName,
         medicationId: medicationId,
         medicationName: medicationName,

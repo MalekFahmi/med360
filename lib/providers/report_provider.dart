@@ -25,7 +25,11 @@ class ReportProvider extends ChangeNotifier {
   }) {
     _allDoses = allDoses;
     _medications = medications;
-    if (allDoses.isEmpty) return;
+    if (allDoses.isEmpty) {
+      _reports = [];
+      notifyListeners();
+      return;
+    }
 
     final Map<String, MonthlyAdherenceSummary> byMonth = {};
 
@@ -47,12 +51,11 @@ class ReportProvider extends ChangeNotifier {
       final medIds = monthDoses.map((d) => d.medicationId).toSet();
       final records = medIds.map((id) {
         final medDoses = monthDoses.where((d) => d.medicationId == id).toList();
-        final medName = medications
-            .firstWhere(
-              (m) => m.id == id,
-              orElse: () => medications.first,
-            )
-            .displayName;
+        final matchingMedication =
+            medications.where((medication) => medication.id == id);
+        final medName = matchingMedication.isEmpty
+            ? medDoses.first.medicationName
+            : matchingMedication.first.displayName;
         return AdherenceRecord(
           medicationId: id,
           medicationName: medName,
