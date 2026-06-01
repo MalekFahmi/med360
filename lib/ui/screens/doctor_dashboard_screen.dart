@@ -17,7 +17,6 @@ class DoctorDashboardScreen extends StatefulWidget {
 class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   List<Map<String, dynamic>> _patients = const [];
   List<Map<String, dynamic>> _reports = const [];
-  List<Map<String, dynamic>> _inbox = const [];
   bool _loading = true;
 
   @override
@@ -34,7 +33,6 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     }
     List<Map<String, dynamic>> patients = const [];
     List<Map<String, dynamic>> reports = const [];
-    List<Map<String, dynamic>> inbox = const [];
     try {
       await FirebaseBackendService().logUserEngagementEvent(
         eventType: 'dailyAppUsage',
@@ -51,7 +49,6 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
         recipientId: doctor.uid,
         recipientRole: 'doctor',
       );
-      inbox = await FirebaseBackendService().fetchDoctorInbox(doctor.uid);
     } catch (e) {
       debugPrint('Doctor dashboard load skipped: $e');
     }
@@ -59,9 +56,49 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     setState(() {
       _patients = patients;
       _reports = reports;
-      _inbox = inbox;
       _loading = false;
     });
+  }
+
+  Future<void> _linkPatient() async {
+    final phone = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _PatientLinkSheet(),
+    );
+    if (phone == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final linked =
+          await FirebaseBackendService().linkPatientToCurrentDoctorByPhone(
+        phone,
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            linked
+                ? 'Patient linked successfully'
+                : 'No patient account was found for that phone number',
+          ),
+          backgroundColor: linked ? AppColors.teal : AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      if (linked) await _loadPatients();
+    } catch (e) {
+      debugPrint('Doctor patient link failed: $e');
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not link patient. Check Firebase rules.'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _reviewReport(String reportId) async {
@@ -132,7 +169,17 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          const SectionLabel('Assigned patients'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const SectionLabel('Assigned patients'),
+              TextButton.icon(
+                onPressed: _linkPatient,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Link patient'),
+              ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.sm),
           if (_loading)
             const Center(child: CircularProgressIndicator())
@@ -141,7 +188,7 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
               icon: Icons.people_alt_outlined,
               title: 'No assigned patients',
               subtitle:
-                  'Patients can assign you from their Care Team screen using your registered email.',
+                  'Link a patient using the phone number on their patient account.',
             )
           else
             ..._patients.map(
@@ -181,67 +228,77 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                 ),
           const SizedBox(height: AppSpacing.md),
           _TrendComparisonCard(reports: _reports),
-          const SizedBox(height: AppSpacing.md),
-          const _MetricCard(
-            icon: Icons.inventory_2_outlined,
-            title: 'Refill risk',
-            value: 'Tracked',
-            subtitle: 'Refill alerts for assigned patients appear below.',
-          ),
-          const SizedBox(height: AppSpacing.md),
-          const SectionLabel('Refill risk alerts'),
-          if (_inbox.where((item) => item['type'] == 'refillAlert').isEmpty)
-            const EmptyState(
-              icon: Icons.inventory_2_outlined,
-              title: 'No refill risks',
-              subtitle: 'Medication inventory alerts will appear here.',
-            )
-          else
-            ..._inbox
-                .where((item) => item['type'] == 'refillAlert')
-                .take(5)
-                .map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: _InboxTile(item: item),
-                  ),
-                ),
         ],
       ),
     );
   }
 }
 
-class _InboxTile extends StatelessWidget {
-  final Map<String, dynamic> item;
+class _PatientLinkSheet extends StatefulWidget {
+  const _PatientLinkSheet();
 
-  const _InboxTile({required this.item});
+  @override
+  State<_PatientLinkSheet> createState() => _PatientLinkSheetState();
+}
+
+class _PatientLinkSheetState extends State<_PatientLinkSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _phoneCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop(context, _phoneCtrl.text.trim());
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.amberLight,
-            foregroundColor: AppColors.amber,
-            child: Icon(Icons.inventory_2_outlined),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item['title'] ?? 'Refill reminder',
-                  style: AppTextStyles.medName,
-                ),
-                const SizedBox(height: 4),
-                Text(item['body'] ?? '', style: AppTextStyles.medDetail),
-              ],
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
+        top: AppSpacing.lg,
+        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+      ),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Link patient', style: AppTextStyles.screenTitle),
+            const SizedBox(height: AppSpacing.md),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Patient phone number',
+                prefixIcon: Icon(Icons.phone_outlined),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Enter the patient phone number';
+                }
+                return null;
+              },
+              onFieldSubmitted: (_) => _submit(),
             ),
-          ),
-        ],
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submit,
+                icon: const Icon(Icons.link_rounded),
+                label: const Text('Link patient'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

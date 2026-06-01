@@ -35,32 +35,10 @@ class CaregiverScreen extends StatelessWidget {
     ));
   }
 
-  Future<void> _addDoctor(BuildContext context) async {
-    final email = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const _DoctorLinkSheet(),
-    );
-    if (email == null || !context.mounted) return;
-
-    final ok = await context.read<AuthProvider>().addDoctorByEmail(email);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Doctor account linked'
-          : context.read<AuthProvider>().errorMessage ??
-              'No doctor account was found for that email'),
-      backgroundColor: ok ? AppColors.teal : AppColors.red,
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
-
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final caregivers = auth.caregivers;
-    final doctors = auth.linkedDoctors;
 
     return Scaffold(
       backgroundColor: AppColors.grayLight,
@@ -110,66 +88,8 @@ class CaregiverScreen extends StatelessWidget {
                   child: _CaregiverCard(caregiver: caregiver),
                 ),
               ),
-            const SizedBox(height: AppSpacing.xl),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const SectionLabel('Assigned Doctors'),
-                TextButton.icon(
-                  onPressed: () => _addDoctor(context),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Link'),
-                ),
-              ],
-            ),
-            if (doctors.isEmpty)
-              const EmptyState(
-                icon: Icons.local_hospital_outlined,
-                title: 'No assigned doctors',
-                subtitle:
-                    'Ask the doctor to sign up first, then link them with their registered email address',
-              )
-            else
-              ...doctors.map(
-                (doctor) => Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: _DoctorCard(doctor: doctor),
-                ),
-              ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _DoctorCard extends StatelessWidget {
-  final DoctorUser doctor;
-  const _DoctorCard({required this.doctor});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.blueLight,
-            foregroundColor: AppColors.blue,
-            child: Icon(Icons.local_hospital_outlined),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(doctor.name, style: AppTextStyles.medName),
-                Text(doctor.specialty, style: AppTextStyles.medDetail),
-                const SizedBox(height: 8),
-                AppBadge(label: doctor.email, variant: BadgeVariant.blue),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -381,75 +301,4 @@ class _CaregiverLinkRequest {
     required this.relationship,
     required this.permission,
   });
-}
-
-class _DoctorLinkSheet extends StatefulWidget {
-  const _DoctorLinkSheet();
-
-  @override
-  State<_DoctorLinkSheet> createState() => _DoctorLinkSheetState();
-}
-
-class _DoctorLinkSheetState extends State<_DoctorLinkSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _emailCtrl.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    if (!_formKey.currentState!.validate()) return;
-    Navigator.pop(context, _emailCtrl.text.trim().toLowerCase());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Link doctor account',
-              style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            TextFormField(
-              controller: _emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Doctor registered email',
-                prefixIcon: Icon(Icons.email_outlined),
-                border: OutlineInputBorder(borderRadius: AppRadius.md),
-              ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Enter the doctor email';
-                }
-                if (!value.contains('@')) return 'Enter a valid email';
-                return null;
-              },
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.link_rounded),
-                label: const Text('Link doctor account'),
-                style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

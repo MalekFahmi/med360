@@ -80,13 +80,22 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.auth.uid == uid;
 
-      allow read, update: if signedIn()
+      allow read: if signedIn()
+        && (
+          request.auth.uid == uid
+          || (
+            isDoctorUser()
+            && resource.data.role == "patient"
+          )
+        );
+
+      allow list: if isDoctorUser();
+
+      allow update: if signedIn()
         && request.auth.uid == uid;
 
       allow delete: if signedIn()
         && request.auth.uid == uid;
-
-      allow list: if false;
     }
 
     match /caregiverDirectory/{caregiverUid} {
@@ -111,6 +120,15 @@ service cloud.firestore {
 
       allow delete: if signedIn()
         && request.auth.uid == doctorUid;
+    }
+
+    match /patientDirectory/{patientUid} {
+      allow read, list: if isDoctorUser();
+
+      allow create, update: if isPatientOwner(patientUid)
+        && request.resource.data.patientUid == patientUid;
+
+      allow delete: if isPatientOwner(patientUid);
     }
 
     match /patients/{patientUid} {
@@ -150,7 +168,18 @@ service cloud.firestore {
           || isPatientOwner(patientUid)
           || request.auth.uid == doctorUid;
 
-        allow create, update, delete: if isPatientOwner(patientUid);
+        allow create, update: if isPatientOwner(patientUid)
+          || (
+            isDoctorUser()
+            && request.auth.uid == doctorUid
+            && request.resource.data.patientUid == patientUid
+          );
+
+        allow delete: if isPatientOwner(patientUid)
+          || (
+            isDoctorUser()
+            && request.auth.uid == doctorUid
+          );
       }
 
       match /medications/{medicationId} {
@@ -217,11 +246,19 @@ service cloud.firestore {
       allow create, update:
         if isPatientOwner(
           request.resource.data.patientUid
+        )
+        || (
+          isDoctorUser()
+          && request.resource.data.doctorId == request.auth.uid
         );
 
       allow delete:
         if isPatientOwner(
           resource.data.patientUid
+        )
+        || (
+          isDoctorUser()
+          && resource.data.doctorId == request.auth.uid
         );
     }
 

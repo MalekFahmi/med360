@@ -338,6 +338,7 @@ class FirebaseBackendService {
       'createdAt': patient.createdAt.toIso8601String(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await _writePatientDirectory(uid, patient);
     await _mirrorPatientCaregivers(
       patientId: patient.id,
       patientUid: uid,
@@ -772,6 +773,98 @@ class FirebaseBackendService {
     }
   }
 
+  Future<bool> linkPatientToCurrentDoctorByPhone(String phone) async {
+    final doctorUid = currentUid;
+    if (!_enabled || _firestore == null || doctorUid == null) return false;
+    final doctorDoc =
+        await _firestore!.collection('users').doc(doctorUid).get();
+    final doctorData = doctorDoc.data();
+    if (doctorData == null || doctorData['role'] != 'doctor') {
+      throw StateError('Current account is not registered as a doctor.');
+    }
+
+    final normalizedPhone = normalizePhone(phone);
+    final patientSnap = await _firestore!
+        .collection('patientDirectory')
+        .where('phoneNormalized', isEqualTo: normalizedPhone)
+        .limit(1)
+        .get();
+    String? patientUid;
+    String? patientId;
+    Map<String, dynamic>? patientData;
+    if (patientSnap.docs.isNotEmpty) {
+      final patientDoc = patientSnap.docs.first;
+      patientData = patientDoc.data();
+      patientUid = patientData['patientUid'] ?? patientDoc.id;
+      patientId = patientData['patientId'] as String?;
+    } else {
+      final usersSnap = await _firestore!
+          .collection('users')
+          .where('role', isEqualTo: 'patient')
+          .where('phoneNormalized', isEqualTo: normalizedPhone)
+          .limit(1)
+          .get();
+      if (usersSnap.docs.isEmpty) return false;
+      final userDoc = usersSnap.docs.first;
+      patientData = userDoc.data();
+      patientUid = userDoc.id;
+      patientId = patientData['patientId'] as String?;
+      if (patientId != null) {
+        try {
+          await _firestore!.collection('patientDirectory').doc(patientUid).set({
+            'patientUid': patientUid,
+            'patientId': patientId,
+            'name': patientData['name'] ?? 'Patient',
+            'phone': patientData['phone'] ?? phone.trim(),
+            'phoneNormalized': normalizedPhone,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('Patient directory backfill skipped: $e');
+        }
+      }
+    }
+    if (patientUid == null || patientId == null) return false;
+
+    final doctor = DoctorUser.fromMap({...doctorData, 'uid': doctorUid});
+    final doctorRef = _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('doctors')
+        .doc(doctorUid);
+    final relationRef = _firestore!
+        .collection('patientDoctorRelations')
+        .doc('${patientUid}_$doctorUid');
+
+    final batch = _firestore!.batch();
+    batch.set(
+      doctorRef,
+      {
+        'doctorId': doctorUid,
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'name': doctor.name,
+        'email': doctor.email,
+        'phone': doctor.phone,
+        'specialty': doctor.specialty,
+        'linkedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    batch.set(
+      relationRef,
+      {
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'doctorId': doctorUid,
+        'linkedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    await batch.commit();
+    return true;
+  }
+
   Future<Map<String, dynamic>?> createManagedPatientForCaregiver({
     required String name,
     required String phone,
@@ -878,6 +971,7 @@ class FirebaseBackendService {
         'deviceToken': token,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      await _writePatientDirectory(uid, patient);
       await _mirrorPatientCaregivers(
         patientId: patient.id,
         patientUid: uid,
@@ -910,6 +1004,19 @@ class FirebaseBackendService {
     }, SetOptions(merge: true));
     await _firestore!.collection('users').doc(uid).set({
       'name': patient.name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _writePatientDirectory(uid, patient);
+  }
+
+  Future<void> _writePatientDirectory(String uid, PatientUser patient) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!.collection('patientDirectory').doc(uid).set({
+      'patientUid': uid,
+      'patientId': patient.id,
+      'name': patient.name,
+      'phone': patient.phone,
+      'phoneNormalized': normalizePhone(patient.phone),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -1189,24 +1296,6 @@ class FirebaseBackendService {
             .collection('notifications')
             .doc(notificationId),
         {...payload, 'recipientId': caregiverUid},
-        SetOptions(merge: true),
-      );
-    }
-
-    final doctors = await _firestore!
-        .collection('patientDoctorRelations')
-        .where('patientUid', isEqualTo: patientUid)
-        .get();
-    for (final relation in doctors.docs) {
-      final doctorUid = relation.data()['doctorId'] as String?;
-      if (doctorUid == null) continue;
-      batch.set(
-        _firestore!
-            .collection('doctorInboxes')
-            .doc(doctorUid)
-            .collection('notifications')
-            .doc(notificationId),
-        {...payload, 'recipientId': doctorUid},
         SetOptions(merge: true),
       );
     }
