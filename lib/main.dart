@@ -218,6 +218,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         await NotificationService().requestPermissions();
         await medicationProvider.loadMedications(pId);
         final meds = medicationProvider.medications;
+        for (final med in meds) {
+          await NotificationService().scheduleMedicationReminders(
+            med,
+            isArabic: auth.arabicMode,
+          );
+        }
         await adherenceProvider.loadAndGenerate(
           patientId: pId,
           medications: meds,

@@ -37,7 +37,19 @@ class MedicationProvider extends ChangeNotifier {
     _status = LoadStatus.loading;
     notifyListeners();
     try {
-      _medications = await _db.getMedications(patientId);
+      final local = await _db.getMedications(patientId);
+      final patientUid = FirebaseBackendService().currentUid;
+      final cloud = patientUid == null
+          ? const <Medication>[]
+          : await FirebaseBackendService().fetchPatientMedications(patientUid);
+      for (final med in cloud) {
+        await _db.insertMedication(patientId, med);
+      }
+      final byId = <String, Medication>{
+        for (final med in local) med.id: med,
+        for (final med in cloud) med.id: med,
+      };
+      _medications = byId.values.toList();
       _status = LoadStatus.loaded;
     } catch (e) {
       _errorMessage = 'Could not load medications.';

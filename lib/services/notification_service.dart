@@ -225,6 +225,29 @@ class NotificationService {
     );
   }
 
+  Future<void> showMedicationChangeAlert({
+    required String medicationName,
+    required String actorRole,
+    required bool isArabic,
+  }) async {
+    if (kIsWeb) return;
+    final fromDoctor = actorRole == 'doctor';
+    await _plugin.show(
+      id: '$medicationName-$actorRole-change'.hashCode.abs(),
+      title: isArabic
+          ? fromDoctor
+              ? 'تم تحديث الدواء من الطبيب'
+              : 'تم تحديث الدواء من مقدم الرعاية'
+          : fromDoctor
+              ? 'Medication updated by doctor'
+              : 'Medication updated by caregiver',
+      body: isArabic
+          ? 'تمت إضافة أو تحديث $medicationName.'
+          : '$medicationName was added or updated.',
+      notificationDetails: _reminderDetails(),
+    );
+  }
+
   Future<void> cancelMedicationReminders(Medication med) async {
     if (kIsWeb) return;
     for (final time in med.reminderTimes) {

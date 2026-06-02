@@ -143,7 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
                           decoration: InputDecoration(
-                              labelText: 'Phone number',
+                              labelText: 'Phone number or email',
                               prefixIcon:
                                   const Icon(Icons.phone_outlined, size: 20),
                               border: const OutlineInputBorder(
@@ -156,7 +156,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 14)),
                           validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Enter your phone number'
+                              ? 'Enter your phone number or email'
                               : null,
                         ),
                       const SizedBox(height: AppSpacing.md),

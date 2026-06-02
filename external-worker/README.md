@@ -2,7 +2,7 @@
 
 This worker replaces Firebase Cloud Functions when the Firebase project cannot use Blaze.
 
-It runs outside Firebase, checks Firestore every minute, marks overdue pending doses as missed after 5 minutes, writes caregiver inbox notifications, and sends caregiver OS push notifications through FCM.
+It runs outside Firebase, checks Firestore every minute, marks overdue pending doses as missed after 5 minutes, writes caregiver inbox notifications, and sends caregiver/patient OS push notifications through FCM.
 
 ## Required Firebase Setup
 

@@ -183,6 +183,8 @@ Future<void> _openPatientAction(BuildContext context) async {
   final ok = action.createNew
       ? await provider.createManagedPatient(
           name: action.name,
+          email: action.email,
+          password: action.password,
           phone: action.phone,
           chronicCondition: action.chronicCondition,
         )
@@ -447,12 +449,16 @@ class _PatientTile extends StatelessWidget {
 class _PatientAction {
   final bool createNew;
   final String name;
+  final String email;
+  final String password;
   final String phone;
   final String? chronicCondition;
 
   const _PatientAction({
     required this.createNew,
     required this.name,
+    required this.email,
+    required this.password,
     required this.phone,
     this.chronicCondition,
   });
@@ -468,6 +474,8 @@ class _PatientActionSheet extends StatefulWidget {
 class _PatientActionSheetState extends State<_PatientActionSheet> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _conditionCtrl = TextEditingController();
   bool _createNew = true;
@@ -475,6 +483,8 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
     _phoneCtrl.dispose();
     _conditionCtrl.dispose();
     super.dispose();
@@ -487,6 +497,8 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
       _PatientAction(
         createNew: _createNew,
         name: _nameCtrl.text.trim().isEmpty ? 'Patient' : _nameCtrl.text.trim(),
+        email: _emailCtrl.text.trim().toLowerCase(),
+        password: _passwordCtrl.text,
         phone: _phoneCtrl.text.trim(),
         chronicCondition: _conditionCtrl.text.trim().isEmpty
             ? null
@@ -539,6 +551,39 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'Enter patient name'
                     : null,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Patient email',
+                  border: OutlineInputBorder(borderRadius: AppRadius.md),
+                ),
+                validator: (value) {
+                  if (!_createNew) return null;
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Enter patient email';
+                  }
+                  if (!value.contains('@')) return 'Enter a valid email';
+                  return null;
+                },
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: _passwordCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Patient password',
+                  border: OutlineInputBorder(borderRadius: AppRadius.md),
+                ),
+                validator: (value) {
+                  if (!_createNew) return null;
+                  if (value == null || value.length < 6) {
+                    return 'Password must be at least 6 characters';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: AppSpacing.md),
             ],

@@ -64,12 +64,16 @@ class CaregiverProvider extends ChangeNotifier {
 
   Future<bool> createManagedPatient({
     required String name,
+    required String email,
+    required String password,
     required String phone,
     String? chronicCondition,
   }) async {
     final created =
         await FirebaseBackendService().createManagedPatientForCaregiver(
       name: name,
+      email: email,
+      password: password,
       phone: phone,
       chronicCondition: chronicCondition,
     );

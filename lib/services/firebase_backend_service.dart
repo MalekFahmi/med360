@@ -50,6 +50,12 @@ class FirebaseBackendService {
         patientName: data['patientName'] ?? 'Patient',
         isArabic: isAr,
       );
+    } else if (data['type'] == 'medicationChanged') {
+      NotificationService().showMedicationChangeAlert(
+        medicationName: data['medicationName'] ?? 'Medication',
+        actorRole: data['actorRole'] ?? 'caregiver',
+        isArabic: data['language'] == 'ar',
+      );
     }
   }
 
@@ -347,6 +353,7 @@ class FirebaseBackendService {
   }
 
   String _patientEmail(String phone) {
+    if (phone.contains('@')) return phone.trim().toLowerCase();
     final normalized = phone.replaceAll(RegExp(r'[^0-9]'), '');
     return '$normalized@patients.med360.local';
   }
@@ -867,40 +874,131 @@ class FirebaseBackendService {
 
   Future<Map<String, dynamic>?> createManagedPatientForCaregiver({
     required String name,
+    required String email,
+    required String password,
     required String phone,
     String? chronicCondition,
   }) async {
     final caregiverUid = currentUid;
-    if (!_enabled || _firestore == null || caregiverUid == null) return null;
+    if (!_enabled ||
+        _firestore == null ||
+        _auth == null ||
+        caregiverUid == null) {
+      return null;
+    }
+    final caregiverDoc =
+        await _firestore!.collection('users').doc(caregiverUid).get();
+    final caregiverData = caregiverDoc.data();
+    if (caregiverData == null || caregiverData['role'] != 'caregiver') {
+      throw StateError('Current account is not registered as a caregiver.');
+    }
+
+    final patientEmail = email.trim().toLowerCase();
+    final secondaryApp = await Firebase.initializeApp(
+      name: 'patient-create-${DateTime.now().microsecondsSinceEpoch}',
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+    late final UserCredential credential;
+    try {
+      credential = await secondaryAuth.createUserWithEmailAndPassword(
+        email: patientEmail,
+        password: password,
+      );
+      await credential.user?.updateDisplayName(name.trim());
+      await secondaryAuth.signOut();
+    } finally {
+      await secondaryApp.delete();
+    }
+
+    final patientUid = credential.user!.uid;
     final patientId = 'PAT-${DateTime.now().millisecondsSinceEpoch}';
-    final patientUid = 'managed_${caregiverUid}_$patientId';
     final normalizedPhone = normalizePhone(phone);
+    final batch = _firestore!.batch();
 
-    await _firestore!.collection('patients').doc(patientUid).set({
-      'uid': patientUid,
-      'patientId': patientId,
-      'ownerUid': caregiverUid,
-      'managedByCaregiver': true,
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'phoneNormalized': normalizedPhone,
-      'chronicCondition': chronicCondition,
-      'arabicMode': true,
-      'caregiverAlertsEnabled': true,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    await _firestore!
-        .collection('patientCaregivers')
-        .doc('${patientUid}_$caregiverUid')
-        .set({
-      'patientUid': patientUid,
-      'patientId': patientId,
-      'caregiverUid': caregiverUid,
-      'linkedAt': FieldValue.serverTimestamp(),
-      'managedByCaregiver': true,
-    }, SetOptions(merge: true));
+    batch.set(
+      _firestore!.collection('users').doc(patientUid),
+      {
+        'uid': patientUid,
+        'role': 'patient',
+        'patientId': patientId,
+        'name': name.trim(),
+        'email': patientEmail,
+        'phone': phone.trim(),
+        'phoneNormalized': normalizedPhone,
+        'createdByCaregiverUid': caregiverUid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _firestore!.collection('patients').doc(patientUid),
+      {
+        'uid': patientUid,
+        'patientId': patientId,
+        'ownerUid': patientUid,
+        'name': name.trim(),
+        'email': patientEmail,
+        'phone': phone.trim(),
+        'phoneNormalized': normalizedPhone,
+        'chronicCondition': chronicCondition,
+        'arabicMode': true,
+        'largeFonts': false,
+        'highContrast': false,
+        'caregiverAlertsEnabled': true,
+        'createdByCaregiverUid': caregiverUid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _firestore!.collection('patientDirectory').doc(patientUid),
+      {
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'phoneNormalized': normalizedPhone,
+        'createdByCaregiverUid': caregiverUid,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _firestore!
+          .collection('patientCaregivers')
+          .doc('${patientUid}_$caregiverUid'),
+      {
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'caregiverUid': caregiverUid,
+        'linkedAt': FieldValue.serverTimestamp(),
+        'createdByCaregiver': true,
+      },
+      SetOptions(merge: true),
+    );
+    batch.set(
+      _firestore!
+          .collection('patients')
+          .doc(patientUid)
+          .collection('caregivers')
+          .doc(caregiverUid),
+      {
+        'caregiverUid': caregiverUid,
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'name': caregiverData['name'] ?? 'Caregiver',
+        'email': caregiverData['email'] ?? '',
+        'phone': caregiverData['phone'] ?? '',
+        'relationship': 'Caregiver',
+        'permission': NotificationPermission.all.name,
+        'linkedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    await batch.commit();
 
     return {
       'patientUid': patientUid,
@@ -1507,6 +1605,49 @@ class FirebaseBackendService {
       action: 'upserted',
       actorRole: actorRole,
     );
+    if (actorRole == 'caregiver' || actorRole == 'doctor') {
+      await _queuePatientMedicationNotification(
+        patientUid: patientUid,
+        patientId: patientId,
+        medication: medication,
+        actorRole: actorRole,
+      );
+    }
+  }
+
+  Future<void> _queuePatientMedicationNotification({
+    required String patientUid,
+    required String patientId,
+    required Medication medication,
+    required String actorRole,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    final notificationId =
+        'MED-${medication.id}-$actorRole-${DateTime.now().millisecondsSinceEpoch}';
+    final fromDoctor = actorRole == 'doctor';
+    await _firestore!
+        .collection('patientInboxes')
+        .doc(patientUid)
+        .collection('notifications')
+        .doc(notificationId)
+        .set({
+      'id': notificationId,
+      'patientUid': patientUid,
+      'patientId': patientId,
+      'recipientId': patientUid,
+      'medicationId': medication.id,
+      'medicationName': medication.name,
+      'actorRole': actorRole,
+      'actorUid': currentUid,
+      'title': fromDoctor
+          ? 'تم تحديث الدواء من الطبيب'
+          : 'تم تحديث الدواء من مقدم الرعاية',
+      'body': 'تمت إضافة أو تحديث ${medication.name}.',
+      'language': 'ar',
+      'type': 'medicationChanged',
+      'delivered': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<List<Medication>> fetchPatientMedications(String patientUid) async {

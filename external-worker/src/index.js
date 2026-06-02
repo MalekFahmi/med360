@@ -200,24 +200,122 @@ async function deliverPendingNotifications() {
 
   let pushed = 0;
   for (const doc of snapshot.docs) {
-    if (!isCaregiverInboxNotification(doc)) continue;
-
     const notification = doc.data();
     if (!notification) continue;
 
-    const caregiverUid = notification.caregiverId || caregiverUidFromPath(doc);
-    if (!caregiverUid) continue;
+    let sent = false;
+    if (isCaregiverInboxNotification(doc)) {
+      const caregiverUid = notification.caregiverId || inboxUidFromPath(
+        doc,
+        "caregiverInboxes",
+      );
+      if (!caregiverUid) continue;
 
-    const sent = await sendCaregiverPush({
-      caregiverUid,
-      notificationId: doc.id,
-      notification,
-      notificationRef: doc.ref,
-    });
+      sent = await sendCaregiverPush({
+        caregiverUid,
+        notificationId: doc.id,
+        notification,
+        notificationRef: doc.ref,
+      });
+    } else if (isPatientInboxNotification(doc)) {
+      const patientUid = notification.patientUid || inboxUidFromPath(
+        doc,
+        "patientInboxes",
+      );
+      if (!patientUid) continue;
+
+      sent = await sendPatientPush({
+        patientUid,
+        notificationId: doc.id,
+        notification,
+        notificationRef: doc.ref,
+      });
+    } else {
+      continue;
+    }
     if (sent) pushed += 1;
   }
 
   return pushed;
+}
+
+async function sendPatientPush({
+  patientUid,
+  notificationId,
+  notification,
+  notificationRef,
+}) {
+  const patientDoc = await db.collection("patients").doc(patientUid).get();
+  const token = patientDoc.get("deviceToken");
+
+  if (!token) {
+    await notificationRef.set(
+      {
+        delivered: false,
+        deliveryError: "missing-fcm-token",
+        deliveryAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      {merge: true},
+    );
+    return false;
+  }
+
+  const title = notification.title || "Medication updated";
+  const body =
+    notification.body ||
+    `${notification.medicationName || "Medication"} was added or updated.`;
+
+  try {
+    const response = await messaging.send({
+      token,
+      notification: {title, body},
+      data: {
+        notificationId,
+        patientUid,
+        type: String(notification.type || "medicationChanged"),
+        patientId: String(notification.patientId || ""),
+        medicationId: String(notification.medicationId || ""),
+        medicationName: String(notification.medicationName || ""),
+        actorRole: String(notification.actorRole || ""),
+        language: String(notification.language || "ar"),
+      },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "med360_reminders",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    });
+
+    await notificationRef.set(
+      {
+        delivered: true,
+        deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        deliveryError: admin.firestore.FieldValue.delete(),
+        messageId: response,
+      },
+      {merge: true},
+    );
+    return true;
+  } catch (error) {
+    await notificationRef.set(
+      {
+        delivered: false,
+        deliveryError: error.code || error.message || String(error),
+        deliveryAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      {merge: true},
+    );
+    console.error("Patient FCM send failed:", patientUid, notificationId, error);
+    return false;
+  }
 }
 
 async function sendCaregiverPush({
@@ -336,9 +434,9 @@ function shouldNotifyCaregivers(dose) {
   );
 }
 
-function caregiverUidFromPath(doc) {
+function inboxUidFromPath(doc, collectionName) {
   const segments = doc.ref.path.split("/");
-  const inboxIndex = segments.indexOf("caregiverInboxes");
+  const inboxIndex = segments.indexOf(collectionName);
   if (inboxIndex < 0 || inboxIndex + 1 >= segments.length) return null;
   return segments[inboxIndex + 1];
 }
@@ -348,6 +446,15 @@ function isCaregiverInboxNotification(doc) {
   return (
     segments.length >= 4 &&
     segments[0] === "caregiverInboxes" &&
+    segments[2] === "notifications"
+  );
+}
+
+function isPatientInboxNotification(doc) {
+  const segments = doc.ref.path.split("/");
+  return (
+    segments.length >= 4 &&
+    segments[0] === "patientInboxes" &&
     segments[2] === "notifications"
   );
 }
