@@ -1,438 +1,508 @@
 import 'package:flutter/material.dart';
-import 'package:med360/ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import '../widgets/shared_widgets.dart';
+
 import '../../models/models.dart';
 import '../../providers/providers.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
-  void _onTake(BuildContext context, DoseConfirmation dose) async {
+  Future<void> _takeDose(BuildContext context, DoseConfirmation dose) async {
     final auth = context.read<AuthProvider>();
-    final medicationProvider = context.read<MedicationProvider>();
+    final meds = context.read<MedicationProvider>();
     await context
         .read<AdherenceProvider>()
         .confirmDoseTaken(dose.id, auth.patient!.id);
-    final medication = medicationProvider.findById(dose.medicationId);
+
+    final medication = meds.findById(dose.medicationId);
     if (medication != null && medication.quantityRemaining > 0) {
-      await medicationProvider.updateMedication(
+      await meds.updateMedication(
         auth.patient!.id,
         medication.copyWith(
           quantityRemaining: medication.quantityRemaining - 1,
         ),
-        isArabic: auth.arabicMode,
+        isArabic: true,
       );
     }
-    if (context.mounted) {
-      final adherence = context.read<AdherenceProvider>();
-      if (adherence.showDailyCelebration) {
-        adherence.clearDailyCelebration();
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Great job!'),
-            content: const Text(
-              'You completed all your medications today. Keep the streak going.',
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Continue'),
-              ),
-            ],
-          ),
-        );
-        if (!context.mounted) return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('✓  ${dose.medicationName} taken'),
-        backgroundColor: AppColors.teal,
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('تم تسجيل ${dose.medicationName} كمأخوذ'),
+        backgroundColor: AppColors.green,
         behavior: SnackBarBehavior.floating,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
-        margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 2),
-      ));
-    }
+      ),
+    );
   }
 
-  void _onMiss(BuildContext context, DoseConfirmation dose) async {
+  Future<void> _missDose(BuildContext context, DoseConfirmation dose) async {
     final auth = context.read<AuthProvider>();
-    final adh = context.read<AdherenceProvider>();
-    final cgPrv = context.read<CaregiverProvider>();
-
-    final cgIds = await adh.confirmDoseMissed(
+    final adherence = context.read<AdherenceProvider>();
+    final caregiverProvider = context.read<CaregiverProvider>();
+    final caregiverIds = await adherence.confirmDoseMissed(
       dose.id,
       auth.patient!.id,
       caregivers: auth.caregivers,
       caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
     );
 
-    if (cgIds.isNotEmpty) {
-      await cgPrv.dispatchMissedDoseAlert(
+    if (caregiverIds.isNotEmpty) {
+      await caregiverProvider.dispatchMissedDoseAlert(
         patientId: auth.patient!.id,
-        caregiverIds: cgIds,
+        caregiverIds: caregiverIds,
         allCaregivers: auth.caregivers,
         doseId: dose.id,
         medicationId: dose.medicationId,
         medicationName: dose.medicationName,
         missedAt: DateTime.now(),
-        patientName: auth.patient?.name ?? 'Patient',
-        isArabic: auth.arabicMode,
+        patientName: auth.patient?.name ?? 'مريض',
+        isArabic: true,
       );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('⚠  Dose missed — caregiver notified'),
-          backgroundColor: AppColors.amber,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
-          margin: EdgeInsets.all(16),
-          duration: Duration(seconds: 3),
-        ));
-      }
     }
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('تم تسجيل الجرعة كفائتة'),
+        backgroundColor: AppColors.amber,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final adh = context.watch<AdherenceProvider>();
-    final meds = context.watch<MedicationProvider>();
-    final now = DateTime.now();
-    final isAr = auth.arabicMode;
-    final today = adh.todaysDoses;
-    final rate = adh.monthlyAdherenceRate(now.year, now.month);
-    final taken = today.where((d) => d.isTaken).length;
-    final missed = today.where((d) => d.isMissed).length;
-    final refillRisks = meds.medications.where((m) => m.needsRefill).toList();
+    final adherence = context.watch<AdherenceProvider>();
+    final medications = context.watch<MedicationProvider>();
+    final today = adherence.todaysDoses;
+    final pending = today.where((dose) => dose.isPending).toList();
+    final taken = today.where((dose) => dose.isTaken).length;
+    final missed = today.where((dose) => dose.isMissed).length;
+    final total = today.length;
+    final progress = total == 0 ? 0.0 : taken / total;
+    final currentStreak = adherence.currentStreak;
+    final longestStreak = adherence.longestStreak;
 
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
+      backgroundColor: AppColors.pageTint,
       body: SafeArea(
-        child: CustomScrollView(slivers: [
-          // App bar
-          SliverAppBar(
-            backgroundColor: AppColors.teal,
-            expandedHeight: 130,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              title: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                        isAr
-                            ? 'مرحباً، ${auth.patient?.name ?? ""}'
-                            : 'Hello, ${auth.patient?.name ?? ""} 👋',
-                        style: const TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600)),
-                    Text(
-                        isAr
-                            ? '${adh.pendingCount} جرعات اليوم'
-                            : '${adh.pendingCount} doses pending today',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 11)),
-                  ]),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
+          children: [
+            _Header(name: auth.patient?.name ?? ''),
+            const SizedBox(height: AppSpacing.lg),
+            _TodaySummary(
+              total: total,
+              taken: taken,
+              missed: missed,
+              progress: progress,
+              currentStreak: currentStreak,
+              longestStreak: longestStreak,
             ),
-          ),
-
-          SliverPadding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            sliver: SliverList(
-                delegate: SliverChildListDelegate([
-              // Metric grid
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: 2.2,
-                children: [
-                  MetricTile(
-                      label: isAr ? 'الالتزام هذا الشهر' : 'This month',
-                      value: '${(rate * 100).round()}%',
-                      valueColor: AppColors.teal),
-                  MetricTile(
-                      label: isAr ? 'مأخوذة اليوم' : 'Taken today',
-                      value: '$taken',
-                      valueColor: AppColors.green),
-                  MetricTile(
-                      label: isAr ? 'فائتة اليوم' : 'Missed today',
-                      value: '$missed',
-                      valueColor: AppColors.amber),
-                  MetricTile(
-                      label: isAr ? 'معلقة' : 'Pending',
-                      value: '${adh.pendingCount}',
-                      valueColor: AppColors.grayDark),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-
-              AppCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _MiniStat(
-                        icon: Icons.local_fire_department_outlined,
-                        title: 'Current streak',
-                        value: '${adh.currentStreak} days',
-                      ),
-                    ),
-                    Expanded(
-                      child: _MiniStat(
-                        icon: Icons.emoji_events_outlined,
-                        title: 'Best streak',
-                        value: '${adh.longestStreak} days',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              if (adh.currentStreak >= 3) ...[
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Achievement badges',
-                          style: AppTextStyles.medName),
-                      const SizedBox(height: AppSpacing.sm),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final milestone in const [3, 7, 14, 30, 100])
-                            if (adh.currentStreak >= milestone)
-                              AppBadge(
-                                label: '$milestone days',
-                                variant: BadgeVariant.green,
-                                icon: Icons.emoji_events_outlined,
-                              ),
-                        ],
-                      ),
-                    ],
+            const SizedBox(height: AppSpacing.xl),
+            Text(
+              pending.isEmpty ? 'حالة اليوم' : 'الجرعات المتبقية',
+              style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (adherence.isLoading)
+              ...List.generate(
+                3,
+                (_) => const Padding(
+                  padding: EdgeInsets.only(bottom: AppSpacing.md),
+                  child: AppCard(
+                    child: SkeletonBox(height: 74),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.lg),
-              ],
-
-              if (refillRisks.isNotEmpty) ...[
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.inventory_2_outlined,
-                              color: AppColors.amber),
-                          SizedBox(width: AppSpacing.sm),
-                          Text('Refill alerts', style: AppTextStyles.medName),
-                        ],
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                      ...refillRisks.take(3).map(
-                            (med) => Padding(
-                              padding:
-                                  const EdgeInsets.only(top: AppSpacing.xs),
-                              child: Text(
-                                '${isAr ? med.displayNameAr : med.displayName}: ${med.estimatedDaysRemaining.toStringAsFixed(1)} days left',
-                                style: AppTextStyles.medDetail,
-                              ),
-                            ),
-                          ),
-                    ],
+              )
+            else if (medications.isEmpty)
+              const EmptyState(
+                icon: Icons.medication_outlined,
+                title: 'لا توجد أدوية بعد',
+                subtitle: 'اذهب إلى أدويتي وأضف أول دواء',
+              )
+            else if (today.isEmpty)
+              const EmptyState(
+                icon: Icons.event_available_rounded,
+                title: 'لا توجد جرعات اليوم',
+                subtitle: 'عندما يكون لديك جرعات مجدولة ستظهر هنا',
+              )
+            else if (pending.isEmpty)
+              const _DoneForTodayCard()
+            else
+              ...pending.map(
+                (dose) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: _DoseActionCard(
+                    dose: dose,
+                    onTake: () => _takeDose(context, dose),
+                    onMiss: () => _missDose(context, dose),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.lg),
-              ],
-
-              AppCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _MiniStat(
-                        icon: Icons.health_and_safety_outlined,
-                        title: 'Caregivers',
-                        value: '${auth.caregivers.length}',
-                      ),
-                    ),
-                    Expanded(
-                      child: _MiniStat(
-                        icon: Icons.local_hospital_outlined,
-                        title: 'Doctors',
-                        value: '${auth.linkedDoctors.length}',
-                      ),
-                    ),
-                  ],
-                ),
               ),
-              const SizedBox(height: AppSpacing.lg),
-
-              // Adherence bar
-              AppCard(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          SectionLabel(
-                              isAr ? 'الالتزام الشهري' : 'Monthly adherence'),
-                          AppBadge.adherence(rate >= 0.8
-                              ? (isAr ? 'جيد' : 'Good')
-                              : rate >= 0.6
-                                  ? (isAr ? 'مقبول' : 'Fair')
-                                  : (isAr ? 'ضعيف' : 'Poor')),
-                        ]),
-                    AdherenceBar(rate: rate),
-                    const SizedBox(height: 6),
-                    Text(
-                        '${(rate * 100).round()}% — $taken taken, $missed missed this month',
-                        style: AppTextStyles.medDetail),
-                  ])),
-              const SizedBox(height: AppSpacing.lg),
-
-              // Today header
-              Text(isAr ? "أدوية اليوم" : "Today's medications",
-                  style: AppTextStyles.screenTitle.copyWith(fontSize: 16)),
-              const SizedBox(height: AppSpacing.sm),
-
-              if (adh.isLoading)
-                ...List.generate(
-                    3,
-                    (_) => const Padding(
-                          padding: EdgeInsets.only(bottom: 10),
-                          child: AppCard(
-                              child: Row(children: [
-                            SkeletonBox(
-                                height: 44, width: 44, radius: AppRadius.md),
-                            SizedBox(width: 12),
-                            Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                  SkeletonBox(height: 14),
-                                  SizedBox(height: 6),
-                                  SkeletonBox(height: 11),
-                                ])),
-                          ])),
-                        ))
-              else if (meds.isEmpty)
-                EmptyState(
-                  icon: Icons.medication_outlined,
-                  title: isAr ? 'لا توجد أدوية بعد' : 'No medications yet',
-                  subtitle: isAr
-                      ? 'اضغط + لإضافة أول دواء'
-                      : 'Tap + on the Medications tab to add your first medication',
-                )
-              else if (today.isEmpty)
-                AppCard(
-                    child: Center(
-                        child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(children: [
-                              const Icon(Icons.check_circle_outline_rounded,
-                                  size: 40, color: AppColors.teal),
-                              const SizedBox(height: 8),
-                              Text(
-                                  isAr
-                                      ? 'لا جرعات اليوم 🎉'
-                                      : 'No doses scheduled today 🎉',
-                                  style: AppTextStyles.medName),
-                            ]))))
-              else
-                ...today.map((dose) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                      child: _DoseCard(
-                        dose: dose,
-                        onTake: () => _onTake(context, dose),
-                        onMiss: () => _onMiss(context, dose),
-                      ),
-                    )),
-
+            if (today.isNotEmpty && pending.length != today.length) ...[
               const SizedBox(height: AppSpacing.xl),
-            ])),
-          ),
-        ]),
+              Text(
+                'تم التعامل معها',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              ...today.where((dose) => !dose.isPending).map(
+                    (dose) => Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: _CompletedDoseTile(dose: dose),
+                    ),
+                  ),
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _DoseCard extends StatelessWidget {
-  final DoseConfirmation dose;
-  final VoidCallback onTake;
-  final VoidCallback onMiss;
-  const _DoseCard(
-      {required this.dose, required this.onTake, required this.onMiss});
+class _Header extends StatelessWidget {
+  final String name;
 
-  @override
-  Widget build(BuildContext context) {
-    final btnState = switch (dose.status) {
-      DoseStatus.taken => DoseButtonState.taken,
-      DoseStatus.missed => DoseButtonState.missed,
-      _ => DoseButtonState.pending,
-    };
-    return AppCard(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-      child: Row(children: [
-        MedIconBubble(medicationId: dose.medicationId),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(dose.medicationName, style: AppTextStyles.medName),
-          const SizedBox(height: 2),
-          Text(dose.scheduledTime, style: AppTextStyles.medDetail),
-          if (dose.confirmedAt != null)
-            Text(
-              '${dose.isTaken ? "Taken" : "Missed"} at ${dose.confirmedAt!.hour.toString().padLeft(2, "0")}:${dose.confirmedAt!.minute.toString().padLeft(2, "0")}',
-              style: AppTextStyles.medDetail.copyWith(
-                  color: dose.isTaken ? AppColors.teal : AppColors.red),
-            ),
-        ])),
-        DoseActionButton(
-            state: btnState,
-            onTake: dose.isPending ? onTake : null,
-            onMiss: dose.isPending ? onMiss : null),
-      ]),
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-
-  const _MiniStat({
-    required this.icon,
-    required this.title,
-    required this.value,
-  });
+  const _Header({required this.name});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: AppColors.teal),
-        const SizedBox(width: AppSpacing.sm),
+        Container(
+          width: 58,
+          height: 58,
+          decoration: const BoxDecoration(
+            color: AppColors.tealLight,
+            borderRadius: AppRadius.lg,
+          ),
+          child: const Icon(
+            Icons.health_and_safety_rounded,
+            color: AppColors.tealDark,
+            size: 32,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: AppTextStyles.medDetail),
-              Text(value, style: AppTextStyles.medName),
+              Text(
+                name.trim().isEmpty ? 'مرحباً' : 'مرحباً، $name',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 25),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'تابع جرعاتك بسهولة اليوم',
+                style: AppTextStyles.screenSub.copyWith(fontSize: 15),
+              ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _TodaySummary extends StatelessWidget {
+  final int total;
+  final int taken;
+  final int missed;
+  final double progress;
+  final int currentStreak;
+  final int longestStreak;
+
+  const _TodaySummary({
+    required this.total,
+    required this.taken,
+    required this.missed,
+    required this.progress,
+    required this.currentStreak,
+    required this.longestStreak,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            total == 0
+                ? 'لا توجد جرعات اليوم'
+                : 'تم أخذ $taken من $total جرعات',
+            style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          ClipRRect(
+            borderRadius: AppRadius.pill,
+            child: LinearProgressIndicator(
+              minHeight: 16,
+              value: progress.clamp(0, 1),
+              backgroundColor: AppColors.grayLight,
+              valueColor: const AlwaysStoppedAnimation(AppColors.teal),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryNumber(
+                  label: 'مأخوذة',
+                  value: '$taken',
+                  color: AppColors.green,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _SummaryNumber(
+                  label: 'فائتة',
+                  value: '$missed',
+                  color: AppColors.amber,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _SummaryNumber(
+                  label: 'النسبة',
+                  value: '${(progress * 100).round()}%',
+                  color: AppColors.teal,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: AppColors.skyLight,
+              borderRadius: AppRadius.md,
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.local_fire_department_rounded,
+                  color: AppColors.sky,
+                  size: 34,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('سلسلة الالتزام',
+                          style: AppTextStyles.medName),
+                      const SizedBox(height: 3),
+                      Text(
+                        'أفضل سلسلة: $longestStreak يوم',
+                        style: AppTextStyles.medDetail,
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '$currentStreak يوم',
+                  style: AppTextStyles.screenTitle.copyWith(
+                    color: AppColors.sky,
+                    fontSize: 24,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryNumber extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _SummaryNumber({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: AppRadius.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.medDetail.copyWith(fontSize: 13)),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: AppTextStyles.screenTitle.copyWith(
+              color: color,
+              fontSize: 22,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DoseActionCard extends StatelessWidget {
+  final DoseConfirmation dose;
+  final VoidCallback onTake;
+  final VoidCallback onMiss;
+
+  const _DoseActionCard({
+    required this.dose,
+    required this.onTake,
+    required this.onMiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              MedIconBubble(medicationId: dose.medicationId, size: 58),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      dose.medicationName,
+                      style: AppTextStyles.screenTitle.copyWith(fontSize: 23),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'وقت الجرعة: ${dose.scheduledTime}',
+                      style: AppTextStyles.medDetail.copyWith(fontSize: 15),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onTake,
+                  icon: const Icon(Icons.check_rounded, size: 24),
+                  label: const Text('أخذتها'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.teal,
+                    foregroundColor: AppColors.white,
+                    minimumSize: const Size.fromHeight(56),
+                    textStyle: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: AppRadius.md,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onMiss,
+                  icon: const Icon(Icons.close_rounded, size: 24),
+                  label: const Text('فائتة'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.red,
+                    side: const BorderSide(color: AppColors.red, width: 1.4),
+                    minimumSize: const Size.fromHeight(56),
+                    textStyle: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: AppRadius.md,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompletedDoseTile extends StatelessWidget {
+  final DoseConfirmation dose;
+
+  const _CompletedDoseTile({required this.dose});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = dose.isTaken ? AppColors.green : AppColors.red;
+    final label = dose.isTaken ? 'مأخوذة' : 'فائتة';
+    final icon = dose.isTaken ? Icons.check_circle_rounded : Icons.cancel;
+    return AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(dose.medicationName, style: AppTextStyles.medName),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DoneForTodayCard extends StatelessWidget {
+  const _DoneForTodayCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const AppCard(
+      child: Row(
+        children: [
+          Icon(Icons.check_circle_rounded, color: AppColors.green, size: 42),
+          SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              'انتهيت من جرعات اليوم',
+              style: TextStyle(
+                color: AppColors.navy,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

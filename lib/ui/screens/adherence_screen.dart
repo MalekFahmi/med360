@@ -1,12 +1,13 @@
-﻿import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../widgets/shared_widgets.dart';
-import '../theme/app_theme.dart';
+
 import '../../models/models.dart';
 import '../../providers/providers.dart';
 import '../../services/firebase_backend_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class AdherenceScreen extends StatelessWidget {
   const AdherenceScreen({super.key});
@@ -30,7 +31,7 @@ class AdherenceScreen extends StatelessWidget {
     );
     if (recipient == null || !context.mounted) return;
 
-    await reportProvider.shareCurrentReport(
+    final shared = await reportProvider.shareCurrentReport(
       patientId: patient.id,
       patientName: patient.name,
       recipientRole: recipient.role,
@@ -38,11 +39,15 @@ class AdherenceScreen extends StatelessWidget {
       reportType: reportType,
     );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Report shared with ${recipient.name}'),
-      backgroundColor: AppColors.teal,
-      behavior: SnackBarBehavior.floating,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(shared
+            ? 'تمت مشاركة التقرير مع ${recipient.name}'
+            : 'لا توجد بيانات لهذا التقرير'),
+        backgroundColor: shared ? AppColors.teal : AppColors.amber,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _exportPdf(BuildContext context) async {
@@ -61,8 +66,7 @@ class AdherenceScreen extends StatelessWidget {
     if (bytes == null) return;
 
     final fileName =
-        'med360-${patient.name.trim().replaceAll(RegExp(r"\s+"), "-")}-'
-        '$reportType-adherence-report.pdf';
+        'med360-${patient.name.trim().replaceAll(RegExp(r"\s+"), "-")}-$reportType-report.pdf';
     await Share.shareXFiles(
       [
         XFile.fromData(
@@ -71,8 +75,8 @@ class AdherenceScreen extends StatelessWidget {
           mimeType: 'application/pdf',
         ),
       ],
-      subject: 'Med360 adherence report',
-      text: 'Med360 adherence report for ${patient.name}',
+      subject: 'Med360 report',
+      text: 'Med360 report for ${patient.name}',
     );
     await FirebaseBackendService().logUserEngagementEvent(
       patientId: patient.id,
@@ -85,11 +89,13 @@ class AdherenceScreen extends StatelessWidget {
       },
     );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('PDF report ready to share (${bytes.lengthInBytes} bytes)'),
-      backgroundColor: AppColors.teal,
-      behavior: SnackBarBehavior.floating,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('تم تجهيز تقرير PDF للمشاركة'),
+        backgroundColor: AppColors.teal,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _uploadReport(BuildContext context) async {
@@ -123,32 +129,33 @@ class AdherenceScreen extends StatelessWidget {
       fileName: file.name,
       bytes: file.bytes!,
     );
-
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Uploaded ${file.name} to ${recipient.name}'),
-      backgroundColor: AppColors.teal,
-      behavior: SnackBarBehavior.floating,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('تم رفع ${file.name} إلى ${recipient.name}'),
+        backgroundColor: AppColors.teal,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<String?> _chooseReportType(BuildContext context) {
     return showDialog<String>(
       context: context,
       builder: (dialogContext) => SimpleDialog(
-        title: const Text('Report type'),
+        title: const Text('اختر نوع التقرير'),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(dialogContext, 'daily'),
-            child: const Text('Daily report'),
+            child: const Text('تقرير يومي'),
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(dialogContext, 'weekly'),
-            child: const Text('Weekly report'),
+            child: const Text('تقرير أسبوعي'),
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(dialogContext, 'monthly'),
-            child: const Text('Monthly report'),
+            child: const Text('تقرير شهري'),
           ),
         ],
       ),
@@ -157,123 +164,215 @@ class AdherenceScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final reportProv = context.watch<ReportProvider>();
-    final isAr = auth.arabicMode;
-
-    final current = reportProv.currentMonthReport;
-    final past = reportProv.pastReports;
+    final reportProvider = context.watch<ReportProvider>();
+    final current = reportProvider.currentMonthReport;
+    final past = reportProvider.pastReports;
 
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
-      appBar: AppBar(
-        backgroundColor: AppColors.grayLight,
-        title: Text(isAr ? 'التقارير والالتزام' : 'Adherence Reports',
-            style: AppTextStyles.screenTitle),
-        elevation: 0,
-        centerTitle: false,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (current != null) ...[
-              SectionLabel(isAr ? current.monthLabelAr : current.monthLabel),
-              Row(
-                children: [
-                  Expanded(
-                      child: MetricTile(
-                          label: isAr ? 'نسبة الالتزام' : 'Adherence',
-                          value: current.overallPercentage,
-                          valueColor: AppColors.teal)),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                      child: MetricTile(
-                          label: isAr ? 'تم أخذها' : 'Doses Taken',
-                          value: '${current.takenDoses}',
-                          valueColor: AppColors.grayDark)),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                      child: MetricTile(
-                          label: isAr ? 'فائتة' : 'Missed',
-                          value: '${current.missedDoses}',
-                          valueColor: AppColors.red)),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _shareReport(context),
-                  icon: const Icon(Icons.ios_share_rounded),
-                  label: const Text('Share current report'),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _exportPdf(context),
-                  icon: const Icon(Icons.picture_as_pdf_rounded),
-                  label: const Text('Export PDF report'),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _uploadReport(context),
-                  icon: const Icon(Icons.upload_file_rounded),
-                  label: const Text('Upload report file'),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-            ],
-            SectionLabel(isAr ? 'تقارير الأشهر السابقة' : 'Past Months'),
-            if (past.isEmpty)
-              Text(isAr
-                  ? 'لا توجد بيانات سابقة.'
-                  : 'No past data available yet.')
-            else
-              AppCard(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: past
-                      .map((r) => Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(AppSpacing.md),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                        flex: 2,
-                                        child: Text(
-                                            isAr
-                                                ? r.monthLabelAr
-                                                : r.monthLabel,
-                                            style: AppTextStyles.medName)),
-                                    Expanded(
-                                        flex: 3,
-                                        child: AdherenceBar(
-                                            rate: r.overallAdherenceRate)),
-                                    const SizedBox(width: AppSpacing.md),
-                                    Text(r.overallPercentage,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                              const Divider(
-                                  height: 1, color: AppColors.grayLight),
-                            ],
-                          ))
-                      .toList(),
-                ),
-              ),
+      backgroundColor: AppColors.pageTint,
+      appBar: AppBar(title: const Text('التقارير')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+        children: [
+          if (current == null)
+            const EmptyState(
+              icon: Icons.bar_chart_rounded,
+              title: 'لا يوجد تقرير حالياً',
+              subtitle: 'سيظهر التقرير بعد تسجيل جرعاتك',
+            )
+          else ...[
+            _ReportSummaryCard(report: current),
+            const SizedBox(height: AppSpacing.lg),
+            _ReportActions(
+              onShare: () => _shareReport(context),
+              onExport: () => _exportPdf(context),
+              onUpload: () => _uploadReport(context),
+            ),
           ],
-        ),
+          const SizedBox(height: AppSpacing.xl),
+          Text(
+            'تقارير سابقة',
+            style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (past.isEmpty)
+            const AppCard(
+              child: Text(
+                'لا توجد تقارير سابقة بعد',
+                style: AppTextStyles.medName,
+              ),
+            )
+          else
+            ...past.map(
+              (report) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: _PastReportTile(report: report),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportSummaryCard extends StatelessWidget {
+  final MonthlyAdherenceSummary report;
+
+  const _ReportSummaryCard({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            report.monthLabelAr,
+            style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _ReportMetric(
+                  label: 'الالتزام',
+                  value: report.overallPercentage,
+                  color: AppColors.teal,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _ReportMetric(
+                  label: 'مأخوذة',
+                  value: '${report.takenDoses}',
+                  color: AppColors.green,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _ReportMetric(
+                  label: 'فائتة',
+                  value: '${report.missedDoses}',
+                  color: AppColors.red,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          AdherenceBar(rate: report.overallAdherenceRate, height: 14),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _ReportMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: AppRadius.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.medDetail),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: AppTextStyles.screenTitle.copyWith(
+              color: color,
+              fontSize: 22,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportActions extends StatelessWidget {
+  final VoidCallback onShare;
+  final VoidCallback onExport;
+  final VoidCallback onUpload;
+
+  const _ReportActions({
+    required this.onShare,
+    required this.onExport,
+    required this.onUpload,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onShare,
+              icon: const Icon(Icons.ios_share_rounded),
+              label: const Text('مشاركة التقرير'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onExport,
+              icon: const Icon(Icons.picture_as_pdf_rounded),
+              label: const Text('تصدير PDF'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onUpload,
+              icon: const Icon(Icons.upload_file_rounded),
+              label: const Text('رفع ملف'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PastReportTile extends StatelessWidget {
+  final MonthlyAdherenceSummary report;
+
+  const _PastReportTile({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(report.monthLabelAr, style: AppTextStyles.medName),
+          ),
+          Text(
+            report.overallPercentage,
+            style: AppTextStyles.screenTitle.copyWith(
+              color: AppColors.teal,
+              fontSize: 22,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -310,20 +409,19 @@ class _ReportShareSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Share report',
-            style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
+            'مشاركة التقرير',
+            style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
           ),
           const SizedBox(height: AppSpacing.md),
           if (!hasRecipients)
             const EmptyState(
               icon: Icons.group_add_outlined,
-              title: 'No recipients yet',
-              subtitle:
-                  'Link a caregiver or doctor before sharing adherence reports.',
+              title: 'لا يوجد مستلمون',
+              subtitle: 'اربط مرافقاً أو طبيباً قبل مشاركة التقارير',
             )
           else ...[
             if (doctors.isNotEmpty) ...[
-              const SectionLabel('Doctors'),
+              const SectionLabel('الأطباء'),
               ...doctors.map(
                 (doctor) => ListTile(
                   leading: const Icon(Icons.local_hospital_outlined),
@@ -341,7 +439,7 @@ class _ReportShareSheet extends StatelessWidget {
               ),
             ],
             if (caregivers.isNotEmpty) ...[
-              const SectionLabel('Caregivers'),
+              const SectionLabel('المرافقون'),
               ...caregivers.map(
                 (caregiver) => ListTile(
                   leading: const Icon(Icons.health_and_safety_outlined),
@@ -364,4 +462,3 @@ class _ReportShareSheet extends StatelessWidget {
     );
   }
 }
-

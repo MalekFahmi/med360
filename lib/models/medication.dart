@@ -1,4 +1,4 @@
-﻿// Medication model — standalone version.
+// Medication model — standalone version.
 // The patient creates and owns all their medication records directly.
 
 enum ReminderType { notification, alarm }
@@ -70,7 +70,7 @@ class Medication {
     this.endDate,
     this.quantityRemaining = 0,
     this.dosesPerDay = 1,
-    this.refillThreshold = 7,
+    this.refillThreshold = 3,
     this.notes,
     this.notesAr,
   });
@@ -79,8 +79,14 @@ class Medication {
   String get displayNameAr => '$nameAr $dosage';
   double get estimatedDaysRemaining =>
       dosesPerDay <= 0 ? 0 : quantityRemaining / dosesPerDay;
-  bool get needsRefill =>
-      quantityRemaining > 0 && estimatedDaysRemaining <= refillThreshold;
+  bool get needsRefill => refillMilestone != null;
+  int? get refillMilestone {
+    if (quantityRemaining <= 0 || dosesPerDay <= 0) return null;
+    final days = estimatedDaysRemaining;
+    if (days <= 1) return 1;
+    if (days <= 3) return 3;
+    return null;
+  }
 
   String get formLabel => switch (form) {
         MedicationForm.tablet => 'Tablet',
@@ -123,6 +129,7 @@ class Medication {
       _ => '$n مرات يوميا',
     };
   }
+
   Map<String, dynamic> toMap() => {
         'id': id,
         'name': name,
@@ -160,7 +167,7 @@ class Medication {
         endDate: m['endDate'] != null ? DateTime.tryParse(m['endDate']) : null,
         quantityRemaining: m['quantityRemaining'] ?? 0,
         dosesPerDay: (m['dosesPerDay'] as num?)?.toDouble() ?? 1,
-        refillThreshold: m['refillThreshold'] ?? 7,
+        refillThreshold: m['refillThreshold'] ?? 3,
         notes: m['notes'],
         notesAr: m['notesAr'],
       );
@@ -202,4 +209,3 @@ class Medication {
         notesAr: notesAr ?? this.notesAr,
       );
 }
-

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:med360/ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import '../widgets/shared_widgets.dart';
+
 import '../../providers/providers.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onSignupTap;
   final AccountRole selectedRole;
   final ValueChanged<AccountRole> onRoleChanged;
+
   const LoginScreen({
     super.key,
     required this.onSignupTap,
@@ -25,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
+
   bool get _usesEmail => widget.selectedRole != AccountRole.patient;
 
   @override
@@ -53,14 +56,14 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
     };
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            Text(context.read<AuthProvider>().errorMessage ?? 'Login failed'),
-        backgroundColor: AppColors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
-        margin: const EdgeInsets.all(AppSpacing.lg),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text(context.read<AuthProvider>().errorMessage ?? 'فشل الدخول'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -68,165 +71,164 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
+      backgroundColor: AppColors.pageTint,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.xl),
+            padding: const EdgeInsets.all(20),
             child: Form(
               key: _formKey,
-              child: Column(children: [
-                Container(
-                    width: 68,
-                    height: 68,
-                    decoration: const BoxDecoration(
-                        color: AppColors.teal, borderRadius: AppRadius.lg),
-                    child: const Icon(Icons.medication_rounded,
-                        color: AppColors.white, size: 36)),
-                const SizedBox(height: AppSpacing.md),
-                Text('MED360',
-                    style: AppTextStyles.screenTitle.copyWith(fontSize: 24)),
-                const SizedBox(height: 4),
-                const Text('Welcome back', style: AppTextStyles.screenSub),
-                const SizedBox(height: AppSpacing.xxl),
-                AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _AuthLogo(title: 'تسجيل الدخول'),
+                  const SizedBox(height: AppSpacing.xl),
+                  AppCard(
+                    padding: const EdgeInsets.all(20),
                     child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text('Sign in',
-                          style:
-                              AppTextStyles.screenTitle.copyWith(fontSize: 18)),
-                      const SizedBox(height: AppSpacing.lg),
-                      SegmentedButton<AccountRole>(
-                        segments: const [
-                          ButtonSegment(
-                              value: AccountRole.patient,
-                              label: Text('Patient'),
-                              icon: Icon(Icons.person_outline_rounded)),
-                          ButtonSegment(
-                              value: AccountRole.caregiver,
-                              label: Text('Caregiver'),
-                              icon: Icon(Icons.health_and_safety_outlined)),
-                          ButtonSegment(
-                              value: AccountRole.doctor,
-                              label: Text('Doctor'),
-                              icon: Icon(Icons.local_hospital_outlined)),
-                        ],
-                        selected: {widget.selectedRole},
-                        onSelectionChanged: (value) =>
-                            widget.onRoleChanged(value.first),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      if (_usesEmail)
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _RoleSelector(
+                          selected: widget.selectedRole,
+                          onChanged: widget.onRoleChanged,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        if (_usesEmail)
+                          TextFormField(
+                            controller: _emailCtrl,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'البريد الإلكتروني',
+                              prefixIcon: Icon(Icons.email_outlined),
+                            ),
+                            validator: (value) =>
+                                value == null || !value.contains('@')
+                                    ? 'أدخل البريد الإلكتروني'
+                                    : null,
+                          )
+                        else
+                          TextFormField(
+                            controller: _phoneCtrl,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'رقم الهاتف أو البريد الإلكتروني',
+                              prefixIcon: Icon(Icons.phone_outlined),
+                            ),
+                            validator: (value) =>
+                                value == null || value.trim().isEmpty
+                                    ? 'أدخل رقم الهاتف أو البريد'
+                                    : null,
+                          ),
+                        const SizedBox(height: AppSpacing.md),
                         TextFormField(
-                          controller: _emailCtrl,
-                          keyboardType: TextInputType.emailAddress,
+                          controller: _passCtrl,
+                          obscureText: _obscure,
                           decoration: InputDecoration(
-                              labelText: 'Email address',
-                              prefixIcon:
-                                  const Icon(Icons.email_outlined, size: 20),
-                              border: const OutlineInputBorder(
-                                  borderRadius: AppRadius.md),
-                              enabledBorder: OutlineInputBorder(
-                                  borderRadius: AppRadius.md,
-                                  borderSide: BorderSide(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.2))),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 14)),
-                          validator: (v) => (v == null || !v.contains('@'))
-                              ? 'Enter your email address'
-                              : null,
-                        )
-                      else
-                        TextFormField(
-                          controller: _phoneCtrl,
-                          keyboardType: TextInputType.phone,
-                          decoration: InputDecoration(
-                              labelText: 'Phone number or email',
-                              prefixIcon:
-                                  const Icon(Icons.phone_outlined, size: 20),
-                              border: const OutlineInputBorder(
-                                  borderRadius: AppRadius.md),
-                              enabledBorder: OutlineInputBorder(
-                                  borderRadius: AppRadius.md,
-                                  borderSide: BorderSide(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.2))),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 14)),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Enter your phone number or email'
+                            labelText: 'كلمة المرور',
+                            prefixIcon: const Icon(Icons.lock_outline_rounded),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
+                            ),
+                          ),
+                          validator: (value) => value == null || value.isEmpty
+                              ? 'أدخل كلمة المرور'
                               : null,
                         ),
-                      const SizedBox(height: AppSpacing.md),
-                      TextFormField(
-                        controller: _passCtrl,
-                        obscureText: _obscure,
-                        decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(Icons.lock_outline_rounded,
-                                size: 20),
-                            suffixIcon: IconButton(
-                                icon: Icon(_obscure
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined),
-                                onPressed: () =>
-                                    setState(() => _obscure = !_obscure)),
-                            border: const OutlineInputBorder(
-                                borderRadius: AppRadius.md),
-                            enabledBorder: OutlineInputBorder(
-                                borderRadius: AppRadius.md,
-                                borderSide: BorderSide(
-                                    color:
-                                        Colors.black.withValues(alpha: 0.2))),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 14)),
-                        validator: (v) => (v == null || v.isEmpty)
-                            ? 'Enter your password'
-                            : null,
-                      ),
-                      const SizedBox(height: AppSpacing.xl),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
+                        const SizedBox(height: AppSpacing.xl),
+                        FilledButton(
                           onPressed: auth.isLoading ? null : _login,
-                          style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.teal,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: const RoundedRectangleBorder(
-                                  borderRadius: AppRadius.md)),
                           child: auth.isLoading
                               ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
+                                  width: 22,
+                                  height: 22,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: AppColors.white))
-                              : const Text('Log in',
-                                  style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600)),
+                                    strokeWidth: 2,
+                                    color: AppColors.white,
+                                  ),
+                                )
+                              : const Text('دخول'),
                         ),
-                      ),
-                    ])),
-                const SizedBox(height: AppSpacing.lg),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Text("Don't have an account? ",
-                      style: AppTextStyles.screenSub),
-                  GestureDetector(
-                    onTap: widget.onSignupTap,
-                    child: const Text('Sign up',
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: AppColors.teal,
-                            fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ),
-                ]),
-              ]),
+                  const SizedBox(height: AppSpacing.lg),
+                  TextButton(
+                    onPressed: widget.onSignupTap,
+                    child: const Text('ليس لديك حساب؟ إنشاء حساب جديد'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AuthLogo extends StatelessWidget {
+  final String title;
+
+  const _AuthLogo({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 76,
+          height: 76,
+          decoration: const BoxDecoration(
+            color: AppColors.teal,
+            borderRadius: AppRadius.lg,
+          ),
+          child: const Icon(
+            Icons.medication_rounded,
+            color: AppColors.white,
+            size: 42,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('MED360', style: AppTextStyles.screenTitle.copyWith(fontSize: 30)),
+        const SizedBox(height: 4),
+        Text(title, style: AppTextStyles.screenSub),
+      ],
+    );
+  }
+}
+
+class _RoleSelector extends StatelessWidget {
+  final AccountRole selected;
+  final ValueChanged<AccountRole> onChanged;
+
+  const _RoleSelector({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<AccountRole>(
+      segments: const [
+        ButtonSegment(
+          value: AccountRole.patient,
+          label: Text('مريض'),
+          icon: Icon(Icons.person_outline_rounded),
+        ),
+        ButtonSegment(
+          value: AccountRole.caregiver,
+          label: Text('مرافق'),
+          icon: Icon(Icons.health_and_safety_outlined),
+        ),
+        ButtonSegment(
+          value: AccountRole.doctor,
+          label: Text('طبيب'),
+          icon: Icon(Icons.local_hospital_outlined),
+        ),
+      ],
+      selected: {selected},
+      onSelectionChanged: (value) => onChanged(value.first),
     );
   }
 }

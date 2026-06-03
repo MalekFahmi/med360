@@ -118,34 +118,42 @@ class CaregiverProvider extends ChangeNotifier {
           var missedCount = 0;
           var refillRisk = 0;
           if (patientUid != null) {
-            final doses = await firestore
-                .collection('patientDoses')
-                .where('ownerUid', isEqualTo: patientUid)
-                .limit(50)
-                .get();
-            final resolved = doses.docs.where((dose) {
-              final status = dose.data()['status'];
-              return status == 'taken' || status == 'missed';
-            }).toList();
-            final taken = resolved
-                .where((dose) => dose.data()['status'] == 'taken')
-                .length;
-            missedCount = resolved
-                .where((dose) => dose.data()['status'] == 'missed')
-                .length;
-            adherenceRate = resolved.isEmpty ? 0 : taken / resolved.length;
-            final meds = await firestore
-                .collection('medicationChangeLogs')
-                .where('patientId', isEqualTo: patientId)
-                .limit(25)
-                .get();
-            refillRisk = meds.docs
-                .where((doc) =>
-                    ((doc.data()['quantityRemaining'] as num?) ?? 0) > 0 &&
-                    ((doc.data()['quantityRemaining'] as num?) ?? 0) /
-                            (((doc.data()['dosesPerDay'] as num?) ?? 1)) <=
-                        (((doc.data()['refillThreshold'] as num?) ?? 7)))
-                .length;
+            try {
+              final doses = await firestore
+                  .collection('patientDoses')
+                  .where('ownerUid', isEqualTo: patientUid)
+                  .limit(50)
+                  .get();
+              final resolved = doses.docs.where((dose) {
+                final status = dose.data()['status'];
+                return status == 'taken' || status == 'missed';
+              }).toList();
+              final taken = resolved
+                  .where((dose) => dose.data()['status'] == 'taken')
+                  .length;
+              missedCount = resolved
+                  .where((dose) => dose.data()['status'] == 'missed')
+                  .length;
+              adherenceRate = resolved.isEmpty ? 0 : taken / resolved.length;
+            } catch (e) {
+              debugPrint('Linked patient adherence metric skipped: $e');
+            }
+            try {
+              final meds = await firestore
+                  .collection('medicationChangeLogs')
+                  .where('patientUid', isEqualTo: patientUid)
+                  .limit(25)
+                  .get();
+              refillRisk = meds.docs
+                  .where((doc) =>
+                      ((doc.data()['quantityRemaining'] as num?) ?? 0) > 0 &&
+                      ((doc.data()['quantityRemaining'] as num?) ?? 0) /
+                              (((doc.data()['dosesPerDay'] as num?) ?? 1)) <=
+                          (((doc.data()['refillThreshold'] as num?) ?? 7)))
+                  .length;
+            } catch (e) {
+              debugPrint('Linked patient refill metric skipped: $e');
+            }
           }
           patients.add({
             'patientId': patientId,

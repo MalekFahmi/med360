@@ -19,6 +19,7 @@ const state = {
   missedDoses: 0,
   notificationsCreated: 0,
   pushesSent: 0,
+  patientAccountsCreated: 0,
 };
 
 initFirebase();
@@ -72,8 +73,10 @@ async function runPoll() {
   state.polls += 1;
 
   try {
+    const accounts = await processPatientAccountRequests();
     const missed = await markOverdueDosesMissed();
     const pushed = await deliverPendingNotifications();
+    state.patientAccountsCreated += accounts;
     state.missedDoses += missed.missedDoses;
     state.notificationsCreated += missed.notificationsCreated;
     state.pushesSent += pushed;
@@ -81,13 +84,168 @@ async function runPoll() {
     state.lastError = null;
     console.log(
       `Poll complete: missed=${missed.missedDoses}, ` +
-        `notifications=${missed.notificationsCreated}, pushed=${pushed}`,
+        `notifications=${missed.notificationsCreated}, ` +
+        `patientAccounts=${accounts}, pushed=${pushed}`,
     );
   } catch (error) {
     state.lastError = error.stack || String(error);
     console.error("Poll failed:", error);
   } finally {
     state.running = false;
+  }
+}
+
+async function processPatientAccountRequests() {
+  const snapshot = await db
+    .collection("patientAccountRequests")
+    .where("status", "==", "pending")
+    .limit(25)
+    .get();
+
+  let created = 0;
+  for (const doc of snapshot.docs) {
+    const ok = await processPatientAccountRequest(doc.ref, doc.data());
+    if (ok) created += 1;
+  }
+  return created;
+}
+
+async function processPatientAccountRequest(requestRef, request) {
+  const email = String(request.email || "").trim().toLowerCase();
+  const password = String(request.password || "");
+  const name = String(request.name || "").trim();
+  const phone = String(request.phone || "").trim();
+  const caregiverUid = String(request.caregiverUid || "");
+  const chronicCondition = request.chronicCondition ?
+    String(request.chronicCondition).trim() :
+    null;
+
+  try {
+    if (!email || !password || !name || !phone || !caregiverUid) {
+      throw new Error("missing-required-fields");
+    }
+
+    const caregiverDoc = await db.collection("users").doc(caregiverUid).get();
+    const caregiver = caregiverDoc.data();
+    if (!caregiver || caregiver.role !== "caregiver") {
+      throw new Error("requester-is-not-caregiver");
+    }
+
+    let userRecord;
+    try {
+      userRecord = await admin.auth().createUser({
+        email,
+        password,
+        displayName: name,
+      });
+    } catch (error) {
+      if (error.code !== "auth/email-already-exists") throw error;
+      userRecord = await admin.auth().getUserByEmail(email);
+      await admin.auth().updateUser(userRecord.uid, {
+        password,
+        displayName: name,
+      });
+    }
+
+    const patientUid = userRecord.uid;
+    const patientId = `PAT-${Date.now()}`;
+    const phoneNormalized = normalizePhone(phone);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+
+    batch.set(db.collection("users").doc(patientUid), {
+      uid: patientUid,
+      role: "patient",
+      patientId,
+      name,
+      email,
+      phone,
+      phoneNormalized,
+      createdByCaregiverUid: caregiverUid,
+      createdAt: now,
+      updatedAt: now,
+    }, {merge: true});
+
+    batch.set(db.collection("patients").doc(patientUid), {
+      uid: patientUid,
+      patientId,
+      ownerUid: patientUid,
+      name,
+      email,
+      phone,
+      phoneNormalized,
+      chronicCondition,
+      arabicMode: true,
+      largeFonts: false,
+      highContrast: false,
+      caregiverAlertsEnabled: true,
+      createdByCaregiverUid: caregiverUid,
+      createdAt: now,
+      updatedAt: now,
+    }, {merge: true});
+
+    batch.set(db.collection("patientDirectory").doc(patientUid), {
+      patientUid,
+      patientId,
+      name,
+      phone,
+      phoneNormalized,
+      updatedAt: now,
+    }, {merge: true});
+
+    batch.set(
+      db.collection("patientCaregivers").doc(`${patientUid}_${caregiverUid}`),
+      {
+        patientUid,
+        patientId,
+        caregiverUid,
+        linkedAt: now,
+        createdByCaregiver: true,
+      },
+      {merge: true},
+    );
+
+    batch.set(
+      db.collection("patients")
+        .doc(patientUid)
+        .collection("caregivers")
+        .doc(caregiverUid),
+      {
+        caregiverUid,
+        patientUid,
+        patientId,
+        name: caregiver.name || "Caregiver",
+        email: caregiver.email || "",
+        phone: caregiver.phone || "",
+        relationship: "Caregiver",
+        permission: "all",
+        linkedAt: now,
+      },
+      {merge: true},
+    );
+
+    batch.update(requestRef, {
+      status: "complete",
+      patientUid,
+      patientId,
+      password: admin.firestore.FieldValue.delete(),
+      completedAt: now,
+    });
+
+    await batch.commit();
+    return true;
+  } catch (error) {
+    console.error("Patient account request failed:", requestRef.id, error);
+    await requestRef.set(
+      {
+        status: "error",
+        password: admin.firestore.FieldValue.delete(),
+        error: error.code || error.message || String(error),
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      {merge: true},
+    );
+    return false;
   }
 }
 

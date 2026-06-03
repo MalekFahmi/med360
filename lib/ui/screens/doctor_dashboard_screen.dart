@@ -6,6 +6,7 @@ import '../../services/firebase_backend_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 import 'shared_patient_medications_screen.dart';
+import 'shared_report_detail_screen.dart';
 
 class DoctorDashboardScreen extends StatefulWidget {
   const DoctorDashboardScreen({super.key});
@@ -22,212 +23,401 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPatients());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  Future<void> _loadPatients() async {
+  Future<void> _load() async {
     final doctor = context.read<AuthProvider>().doctor;
     if (doctor == null) {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    List<Map<String, dynamic>> patients = const [];
-    List<Map<String, dynamic>> reports = const [];
+
     try {
-      await FirebaseBackendService().logUserEngagementEvent(
-        eventType: 'dailyAppUsage',
-        source: 'appOpen',
-        details: {
-          'role': 'doctor',
-          'openedAt': DateTime.now().toIso8601String(),
-        },
-      );
-      patients = await FirebaseBackendService().fetchAssignedPatientsForDoctor(
+      final patients =
+          await FirebaseBackendService().fetchAssignedPatientsForDoctor(
         doctor.uid,
       );
-      reports = await FirebaseBackendService().fetchSharedReportsForRecipient(
+      final reports =
+          await FirebaseBackendService().fetchSharedReportsForRecipient(
         recipientId: doctor.uid,
         recipientRole: 'doctor',
       );
+      if (!mounted) return;
+      setState(() {
+        _patients = patients;
+        _reports = reports;
+        _loading = false;
+      });
     } catch (e) {
       debugPrint('Doctor dashboard load skipped: $e');
+      if (mounted) setState(() => _loading = false);
     }
-    if (!mounted) return;
-    setState(() {
-      _patients = patients;
-      _reports = reports;
-      _loading = false;
-    });
   }
 
   Future<void> _linkPatient() async {
     final phone = await showModalBottomSheet<String>(
       context: context,
-      isScrollControlled: true,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (_) => const _PatientLinkSheet(),
     );
     if (phone == null || !mounted) return;
 
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final linked =
-          await FirebaseBackendService().linkPatientToCurrentDoctorByPhone(
-        phone,
-      );
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            linked
-                ? 'Patient linked successfully'
-                : 'No patient account was found for that phone number',
-          ),
-          backgroundColor: linked ? AppColors.teal : AppColors.red,
-          behavior: SnackBarBehavior.floating,
+    final linked =
+        await FirebaseBackendService().linkPatientToCurrentDoctorByPhone(
+      phone,
+    );
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          linked
+              ? 'تم ربط المريض بالطبيب'
+              : 'لم يتم العثور على مريض بهذا الرقم',
         ),
-      );
-      if (linked) await _loadPatients();
-    } catch (e) {
-      debugPrint('Doctor patient link failed: $e');
-      if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Could not link patient. Check Firebase rules.'),
-          backgroundColor: AppColors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+        backgroundColor: linked ? AppColors.teal : AppColors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    if (linked) await _load();
   }
 
   Future<void> _reviewReport(String reportId) async {
+    if (reportId.isEmpty) return;
     await FirebaseBackendService().markReportReviewed(reportId);
-    await _loadPatients();
+    await _load();
   }
 
   Future<void> _archiveReport(String reportId) async {
+    if (reportId.isEmpty) return;
     await FirebaseBackendService().archiveReport(reportId);
-    await _loadPatients();
+    await _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final doctor = auth.doctor;
+    final doctor = context.watch<AuthProvider>().doctor;
+    final visibleReports =
+        _reports.where((report) => report['archived'] != true).toList();
 
-    return Scaffold(
-      backgroundColor: AppColors.grayLight,
-      appBar: AppBar(
-        title: const Text('Doctor Dashboard'),
-        actions: [
-          IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () => context.read<AuthProvider>().logout(),
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          backgroundColor: AppColors.pageTint,
+          appBar: AppBar(
+            title: const Text('لوحة الطبيب'),
+            actions: [
+              IconButton(
+                tooltip: 'تسجيل الخروج',
+                icon: const Icon(Icons.logout_rounded),
+                onPressed: () => context.read<AuthProvider>().logout(),
+              ),
+            ],
+            bottom: const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.people_alt_outlined), text: 'المرضى'),
+                Tab(icon: Icon(Icons.summarize_outlined), text: 'التقارير'),
+              ],
+            ),
           ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        children: [
-          AppCard(
-            child: Row(
+          body: RefreshIndicator(
+            onRefresh: _load,
+            child: TabBarView(
               children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: const BoxDecoration(
-                    color: AppColors.teal,
-                    borderRadius: AppRadius.md,
-                  ),
-                  child: const Icon(
-                    Icons.local_hospital_outlined,
-                    color: AppColors.white,
-                  ),
+                _PatientsTab(
+                  loading: _loading,
+                  doctorName: doctor?.name ?? 'الطبيب',
+                  specialty: doctor?.specialty.isNotEmpty == true
+                      ? doctor!.specialty
+                      : 'الرعاية الطبية',
+                  patients: _patients,
+                  reportsCount: visibleReports.length,
+                  onLink: _linkPatient,
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        doctor?.name ?? 'Doctor',
-                        style: AppTextStyles.screenTitle.copyWith(fontSize: 18),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        doctor?.specialty.isNotEmpty == true
-                            ? doctor!.specialty
-                            : 'Medical care team',
-                        style: AppTextStyles.screenSub,
-                      ),
-                    ],
-                  ),
+                _ReportsTab(
+                  reports: visibleReports,
+                  onReview: _reviewReport,
+                  onArchive: _archiveReport,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ),
+      ),
+    );
+  }
+}
+
+class _PatientsTab extends StatelessWidget {
+  final bool loading;
+  final String doctorName;
+  final String specialty;
+  final List<Map<String, dynamic>> patients;
+  final int reportsCount;
+  final VoidCallback onLink;
+
+  const _PatientsTab({
+    required this.loading,
+    required this.doctorName,
+    required this.specialty,
+    required this.patients,
+    required this.reportsCount,
+    required this.onLink,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        AppCard(
+          child: Row(
             children: [
-              const SectionLabel('Assigned patients'),
-              TextButton.icon(
-                onPressed: _linkPatient,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Link patient'),
+              const CircleAvatar(
+                radius: 34,
+                backgroundColor: AppColors.teal,
+                child: Icon(
+                  Icons.local_hospital_outlined,
+                  color: AppColors.white,
+                  size: 34,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(doctorName, style: AppTextStyles.screenTitle),
+                    const SizedBox(height: 6),
+                    Text(specialty, style: AppTextStyles.medDetail),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else if (_patients.isEmpty)
-            const EmptyState(
-              icon: Icons.people_alt_outlined,
-              title: 'No assigned patients',
-              subtitle:
-                  'Link a patient using the phone number on their patient account.',
-            )
-          else
-            ..._patients.map(
-              (patient) => Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                child: _PatientTile(patient: patient),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            Expanded(
+              child: MetricTile(
+                label: 'المرضى',
+                value: '${patients.length}',
+                valueColor: AppColors.teal,
               ),
             ),
-          const SizedBox(height: AppSpacing.md),
-          _MetricCard(
-            icon: Icons.summarize_outlined,
-            title: 'Reports',
-            value: '${_reports.where((r) => r['archived'] != true).length}',
-            subtitle: 'Shared adherence reports ready for review.',
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: MetricTile(
+                label: 'التقارير',
+                value: '$reportsCount',
+                valueColor: AppColors.sky,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'المرضى',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: onLink,
+              icon: const Icon(Icons.link_rounded),
+              label: const Text('ربط مريض'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        if (loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (patients.isEmpty)
+          const EmptyState(
+            icon: Icons.people_alt_outlined,
+            title: 'لا يوجد مرضى',
+            subtitle: 'اربط مريضا برقم الهاتف لعرض أدويته وتقاريره.',
+          )
+        else
+          ...patients.map(
+            (patient) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: _PatientCard(patient: patient),
+            ),
           ),
-          const SizedBox(height: AppSpacing.md),
-          const SectionLabel('Recent reports'),
-          if (_reports.where((r) => r['archived'] != true).isEmpty)
-            const EmptyState(
-              icon: Icons.summarize_outlined,
-              title: 'No shared reports',
-              subtitle: 'Reports shared by patients will appear here.',
-            )
-          else
-            ..._reports
-                .where((report) => report['archived'] != true)
-                .take(5)
-                .map(
-                  (report) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: _ReportTile(
+      ],
+    );
+  }
+}
+
+class _ReportsTab extends StatelessWidget {
+  final List<Map<String, dynamic>> reports;
+  final ValueChanged<String> onReview;
+  final ValueChanged<String> onArchive;
+
+  const _ReportsTab({
+    required this.reports,
+    required this.onReview,
+    required this.onArchive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (reports.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: const [
+          EmptyState(
+            icon: Icons.summarize_outlined,
+            title: 'لا توجد تقارير',
+            subtitle: 'ستظهر هنا التقارير التي يشاركها المرضى معك.',
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: reports
+          .map(
+            (report) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: _ReportCard(
+                report: report,
+                onOpen: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SharedReportDetailScreen(
                       report: report,
-                      onReview: () => _reviewReport(report['id']),
-                      onArchive: () => _archiveReport(report['id']),
+                      onReview: () => onReview('${report['id'] ?? ''}'),
+                      onArchive: () => onArchive('${report['id'] ?? ''}'),
                     ),
                   ),
                 ),
-          const SizedBox(height: AppSpacing.md),
-          _TrendComparisonCard(reports: _reports),
+                onReview: () => onReview('${report['id'] ?? ''}'),
+                onArchive: () => onArchive('${report['id'] ?? ''}'),
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _PatientCard extends StatelessWidget {
+  final Map<String, dynamic> patient;
+
+  const _PatientCard({required this.patient});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = '${patient['name'] ?? 'مريض'}';
+    final phone = '${patient['phone'] ?? 'بدون رقم هاتف'}';
+
+    return AppCard(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SharedPatientMedicationsScreen(
+            patient: patient,
+            actorRole: 'doctor',
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            radius: 28,
+            backgroundColor: AppColors.skyLight,
+            child: Icon(Icons.person_rounded, color: AppColors.sky, size: 30),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: AppTextStyles.medName),
+                const SizedBox(height: 6),
+                Text(phone, style: AppTextStyles.medDetail),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_left_rounded, color: AppColors.grayMid),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportCard extends StatelessWidget {
+  final Map<String, dynamic> report;
+  final VoidCallback onOpen;
+  final VoidCallback onReview;
+  final VoidCallback onArchive;
+
+  const _ReportCard({
+    required this.report,
+    required this.onOpen,
+    required this.onReview,
+    required this.onArchive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final data = (report['report'] as Map?) ?? const {};
+    final adherence = (((data['adherenceRate'] as num?) ?? 0) * 100).round();
+    final patientName = '${report['patientName'] ?? 'مريض'}';
+    final reviewed = report['reviewed'] == true || report['reviewedAt'] != null;
+    final type = '${report['reportType'] ?? data['reportType'] ?? 'monthly'}';
+
+    return AppCard(
+      onTap: onOpen,
+      child: Row(
+        children: [
+          const CircleAvatar(
+            backgroundColor: AppColors.tealLight,
+            child: Icon(Icons.summarize_outlined, color: AppColors.teal),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(patientName, style: AppTextStyles.medName),
+                const SizedBox(height: 4),
+                Text(
+                  type == 'uploaded'
+                      ? '${data['fileName'] ?? data['label'] ?? 'ملف مرفوع'}'
+                      : 'معدل الالتزام $adherence%',
+                  style: AppTextStyles.medDetail,
+                ),
+              ],
+            ),
+          ),
+          AppBadge(
+            label: reviewed ? 'تمت المراجعة' : 'جديد',
+            variant: reviewed ? BadgeVariant.teal : BadgeVariant.amber,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'review') onReview();
+              if (value == 'archive') onArchive();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'review', child: Text('تمت المراجعة')),
+              PopupMenuItem(value: 'archive', child: Text('أرشفة')),
+            ],
+          ),
         ],
       ),
     );
@@ -258,333 +448,50 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppSpacing.lg,
-        right: AppSpacing.lg,
-        top: AppSpacing.lg,
-        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Link patient', style: AppTextStyles.screenTitle),
-            const SizedBox(height: AppSpacing.md),
-            TextFormField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Patient phone number',
-                prefixIcon: Icon(Icons.phone_outlined),
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'ربط مريض',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
               ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Enter the patient phone number';
-                }
-                return null;
-              },
-              onFieldSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
+              const SizedBox(height: 8),
+              const Text(
+                'أدخل رقم هاتف المريض كما هو مسجل في حسابه.',
+                style: AppTextStyles.medDetail,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              TextFormField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'رقم هاتف المريض',
+                  prefixIcon: Icon(Icons.phone_outlined),
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'أدخل رقم هاتف المريض'
+                    : null,
+                onFieldSubmitted: (_) => _submit(),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              FilledButton.icon(
                 onPressed: _submit,
                 icon: const Icon(Icons.link_rounded),
-                label: const Text('Link patient'),
+                label: const Text('ربط المريض'),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ReportTile extends StatelessWidget {
-  final Map<String, dynamic> report;
-  final VoidCallback onReview;
-  final VoidCallback onArchive;
-
-  const _ReportTile({
-    required this.report,
-    required this.onReview,
-    required this.onArchive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final data = (report['report'] as Map?) ?? const {};
-    final adherence = ((data['adherenceRate'] as num?) ?? 0) * 100;
-    final reviewed = report['reviewedAt'] != null;
-    final isUploaded = report['reportType'] == 'uploaded';
-    return AppCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.blueLight,
-            foregroundColor: AppColors.blue,
-            child: Icon(Icons.summarize_outlined),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  report['patientName'] ?? 'Patient',
-                  style: AppTextStyles.medName,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  isUploaded
-                      ? 'Uploaded file - ${data['fileName'] ?? data['label'] ?? 'report'}'
-                      : '${report['reportType'] ?? 'monthly'} report - ${adherence.round()}% adherence',
-                  style: AppTextStyles.medDetail,
-                ),
-                if (isUploaded && data['sizeBytes'] != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '${(((data['sizeBytes'] as num?) ?? 0) / 1024).toStringAsFixed(1)} KB',
-                    style: AppTextStyles.medDetail,
-                  ),
-                ],
-                const SizedBox(height: 8),
-                AppBadge(
-                  label: reviewed ? 'Reviewed' : 'New',
-                  variant: reviewed ? BadgeVariant.green : BadgeVariant.amber,
-                ),
-              ],
-            ),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'review') onReview();
-              if (value == 'archive') onArchive();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'review', child: Text('Mark reviewed')),
-              PopupMenuItem(value: 'archive', child: Text('Archive')),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrendComparisonCard extends StatelessWidget {
-  final List<Map<String, dynamic>> reports;
-
-  const _TrendComparisonCard({required this.reports});
-
-  @override
-  Widget build(BuildContext context) {
-    final trendRows = _trendRows();
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.show_chart_rounded, color: AppColors.teal),
-              SizedBox(width: AppSpacing.sm),
-              Text('Trend comparison', style: AppTextStyles.medName),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (trendRows.isEmpty)
-            const Text(
-              'Share at least two adherence reports to compare trends.',
-              style: AppTextStyles.medDetail,
-            )
-          else
-            ...trendRows.map(
-              (row) => Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            row.patientName,
-                            style: AppTextStyles.medName.copyWith(fontSize: 14),
-                          ),
-                        ),
-                        AppBadge(
-                          label:
-                              '${row.firstRate.round()}% -> ${row.latestRate.round()}%',
-                          variant: row.delta >= 0
-                              ? BadgeVariant.green
-                              : BadgeVariant.amber,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: AppRadius.sm,
-                      child: LinearProgressIndicator(
-                        value: (row.latestRate / 100).clamp(0.0, 1.0),
-                        minHeight: 8,
-                        color: row.latestRate >= 80
-                            ? AppColors.teal
-                            : AppColors.amber,
-                        backgroundColor: AppColors.grayLight,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${row.count} reports, ${row.delta >= 0 ? '+' : ''}${row.delta.toStringAsFixed(1)} point change',
-                      style: AppTextStyles.medDetail,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  List<_TrendRow> _trendRows() {
-    final byPatient = <String, List<Map<String, dynamic>>>{};
-    for (final report in reports.where(
-      (report) =>
-          report['archived'] != true && report['reportType'] != 'uploaded',
-    )) {
-      final patientId = '${report['patientId'] ?? report['patientName']}';
-      byPatient.putIfAbsent(patientId, () => []).add(report);
-    }
-
-    final rows = <_TrendRow>[];
-    for (final entry in byPatient.entries) {
-      final patientReports = entry.value
-        ..sort((a, b) => '${a['createdAt']}'.compareTo('${b['createdAt']}'));
-      if (patientReports.length < 2) continue;
-      final first = _rate(patientReports.first);
-      final latest = _rate(patientReports.last);
-      rows.add(
-        _TrendRow(
-          patientName: patientReports.last['patientName'] ?? 'Patient',
-          firstRate: first,
-          latestRate: latest,
-          count: patientReports.length,
         ),
-      );
-    }
-    rows.sort((a, b) => a.latestRate.compareTo(b.latestRate));
-    return rows.take(4).toList();
-  }
-
-  double _rate(Map<String, dynamic> report) {
-    final data = (report['report'] as Map?) ?? const {};
-    return (((data['adherenceRate'] as num?) ?? 0) * 100).toDouble();
-  }
-}
-
-class _TrendRow {
-  final String patientName;
-  final double firstRate;
-  final double latestRate;
-  final int count;
-
-  const _TrendRow({
-    required this.patientName,
-    required this.firstRate,
-    required this.latestRate,
-    required this.count,
-  });
-
-  double get delta => latestRate - firstRate;
-}
-
-class _PatientTile extends StatelessWidget {
-  final Map<String, dynamic> patient;
-  const _PatientTile({required this.patient});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SharedPatientMedicationsScreen(
-            patient: patient,
-            actorRole: 'doctor',
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.tealLight,
-            foregroundColor: AppColors.tealDark,
-            child: Icon(Icons.person_outline_rounded),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  patient['name'] ?? 'Patient',
-                  style: AppTextStyles.medName,
-                ),
-                Text(patient['phone'] ?? '', style: AppTextStyles.medDetail),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.grayMid),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-  final String subtitle;
-
-  const _MetricCard({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Row(
-        children: [
-          Icon(icon, color: AppColors.teal),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: AppTextStyles.medName),
-                const SizedBox(height: 4),
-                Text(subtitle, style: AppTextStyles.screenSub),
-              ],
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.teal,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
       ),
     );
   }

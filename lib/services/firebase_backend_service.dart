@@ -881,8 +881,8 @@ class FirebaseBackendService {
   }) async {
     final caregiverUid = currentUid;
     if (!_enabled ||
-        _firestore == null ||
         _auth == null ||
+        _firestore == null ||
         caregiverUid == null) {
       return null;
     }
@@ -894,74 +894,201 @@ class FirebaseBackendService {
     }
 
     final patientEmail = email.trim().toLowerCase();
-    final secondaryApp = await Firebase.initializeApp(
-      name: 'patient-create-${DateTime.now().microsecondsSinceEpoch}',
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-    late final UserCredential credential;
-    try {
-      credential = await secondaryAuth.createUserWithEmailAndPassword(
-        email: patientEmail,
-        password: password,
-      );
-      await credential.user?.updateDisplayName(name.trim());
-      await secondaryAuth.signOut();
-    } finally {
-      await secondaryApp.delete();
-    }
-
-    final patientUid = credential.user!.uid;
     final patientId = 'PAT-${DateTime.now().millisecondsSinceEpoch}';
-    final normalizedPhone = normalizePhone(phone);
-    final batch = _firestore!.batch();
+    final patient = PatientUser(
+      id: patientId,
+      name: name.trim(),
+      phone: phone.trim(),
+      passwordHash: '',
+      chronicCondition: chronicCondition,
+      caregivers: const [],
+      arabicMode: true,
+      createdAt: DateTime.now(),
+    );
 
-    batch.set(
-      _firestore!.collection('users').doc(patientUid),
-      {
-        'uid': patientUid,
-        'role': 'patient',
-        'patientId': patientId,
-        'name': name.trim(),
-        'email': patientEmail,
-        'phone': phone.trim(),
-        'phoneNormalized': normalizedPhone,
-        'createdByCaregiverUid': caregiverUid,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
-    batch.set(
-      _firestore!.collection('patients').doc(patientUid),
-      {
-        'uid': patientUid,
-        'patientId': patientId,
-        'ownerUid': patientUid,
-        'name': name.trim(),
-        'email': patientEmail,
-        'phone': phone.trim(),
-        'phoneNormalized': normalizedPhone,
-        'chronicCondition': chronicCondition,
-        'arabicMode': true,
-        'largeFonts': false,
-        'highContrast': false,
-        'caregiverAlertsEnabled': true,
-        'createdByCaregiverUid': caregiverUid,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
-    batch.set(
-      _firestore!.collection('patientDirectory').doc(patientUid),
-      {
+    FirebaseApp? secondaryApp;
+    UserCredential credential;
+    try {
+      secondaryApp = await Firebase.initializeApp(
+        name: 'managed-patient-${DateTime.now().microsecondsSinceEpoch}',
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+      try {
+        credential = await secondaryAuth.createUserWithEmailAndPassword(
+          email: patientEmail,
+          password: password,
+        );
+      } on FirebaseAuthException catch (e) {
+        if (e.code != 'email-already-in-use') rethrow;
+        credential = await secondaryAuth.signInWithEmailAndPassword(
+          email: patientEmail,
+          password: password,
+        );
+      }
+      await credential.user?.updateDisplayName(patient.name);
+      final patientUid = credential.user!.uid;
+      await secondaryAuth.signOut();
+
+      await _writeManagedPatientDocs(
+        patientUid: patientUid,
+        patient: patient,
+        email: patientEmail,
+        caregiverUid: caregiverUid,
+        caregiverData: caregiverData,
+      );
+
+      return {
         'patientUid': patientUid,
         'patientId': patientId,
-        'name': name.trim(),
-        'phone': phone.trim(),
-        'phoneNormalized': normalizedPhone,
-        'createdByCaregiverUid': caregiverUid,
+        'name': patient.name,
+        'phone': patient.phone,
+      };
+    } finally {
+      await secondaryApp?.delete();
+    }
+  }
+
+  Future<bool> linkExistingPatientToCurrentCaregiverByPhone(
+    String phone,
+  ) async {
+    final caregiverUid = currentUid;
+    if (!_enabled || _firestore == null || caregiverUid == null) return false;
+    final caregiverDoc =
+        await _firestore!.collection('users').doc(caregiverUid).get();
+    final caregiverData = caregiverDoc.data();
+    if (caregiverData == null || caregiverData['role'] != 'caregiver') {
+      throw StateError('Current account is not registered as a caregiver.');
+    }
+    final normalizedPhone = normalizePhone(phone);
+    final users = await _firestore!
+        .collection('users')
+        .where('role', isEqualTo: 'patient')
+        .where('phoneNormalized', isEqualTo: normalizedPhone)
+        .limit(1)
+        .get();
+    if (users.docs.isEmpty) return false;
+    final userDoc = users.docs.first;
+    final patientUid = userDoc.id;
+    final patientId = userDoc.data()['patientId'] as String?;
+    if (patientId == null) return false;
+    await _writeCaregiverPatientRelationship(
+      patientUid: patientUid,
+      patientId: patientId,
+      caregiverUid: caregiverUid,
+      caregiverData: caregiverData,
+    );
+    return true;
+  }
+
+  Future<void> _writeManagedPatientDocs({
+    required String patientUid,
+    required PatientUser patient,
+    required String email,
+    required String caregiverUid,
+    required Map<String, dynamic> caregiverData,
+  }) async {
+    final batch = _firestore!.batch();
+    final userRef = _firestore!.collection('users').doc(patientUid);
+    final patientRef = _firestore!.collection('patients').doc(patientUid);
+    final directoryRef =
+        _firestore!.collection('patientDirectory').doc(patientUid);
+
+    batch.set(
+        userRef,
+        {
+          'uid': patientUid,
+          'role': 'patient',
+          'patientId': patient.id,
+          'name': patient.name,
+          'email': email,
+          'phone': patient.phone,
+          'phoneNormalized': normalizePhone(patient.phone),
+          'createdByCaregiverUid': caregiverUid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true));
+    batch.set(
+        patientRef,
+        {
+          'uid': patientUid,
+          'patientId': patient.id,
+          'ownerUid': patientUid,
+          'name': patient.name,
+          'email': email,
+          'phone': patient.phone,
+          'phoneNormalized': normalizePhone(patient.phone),
+          'chronicCondition': patient.chronicCondition,
+          'arabicMode': true,
+          'largeFonts': false,
+          'highContrast': false,
+          'caregiverAlertsEnabled': true,
+          'createdByCaregiverUid': caregiverUid,
+          'createdAt': patient.createdAt.toIso8601String(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true));
+    batch.set(
+        directoryRef,
+        {
+          'patientUid': patientUid,
+          'patientId': patient.id,
+          'name': patient.name,
+          'phone': patient.phone,
+          'phoneNormalized': normalizePhone(patient.phone),
+          'createdByCaregiverUid': caregiverUid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true));
+    _setCaregiverPatientRelationshipInBatch(
+      batch: batch,
+      patientUid: patientUid,
+      patientId: patient.id,
+      caregiverUid: caregiverUid,
+      caregiverData: caregiverData,
+    );
+    await batch.commit();
+  }
+
+  Future<void> _writeCaregiverPatientRelationship({
+    required String patientUid,
+    required String patientId,
+    required String caregiverUid,
+    required Map<String, dynamic> caregiverData,
+  }) async {
+    final batch = _firestore!.batch();
+    _setCaregiverPatientRelationshipInBatch(
+      batch: batch,
+      patientUid: patientUid,
+      patientId: patientId,
+      caregiverUid: caregiverUid,
+      caregiverData: caregiverData,
+    );
+    await batch.commit();
+  }
+
+  void _setCaregiverPatientRelationshipInBatch({
+    required WriteBatch batch,
+    required String patientUid,
+    required String patientId,
+    required String caregiverUid,
+    required Map<String, dynamic> caregiverData,
+  }) {
+    batch.set(
+      _firestore!
+          .collection('patients')
+          .doc(patientUid)
+          .collection('caregivers')
+          .doc(caregiverUid),
+      {
+        'caregiverUid': caregiverUid,
+        'patientUid': patientUid,
+        'patientId': patientId,
+        'name': caregiverData['name'] ?? '',
+        'email': caregiverData['email'],
+        'phone': caregiverData['phone'] ?? '',
+        'relationship': 'مرافق',
+        'permission': NotificationPermission.missedDoseOnly.name,
         'updatedAt': FieldValue.serverTimestamp(),
       },
       SetOptions(merge: true),
@@ -975,66 +1102,9 @@ class FirebaseBackendService {
         'patientId': patientId,
         'caregiverUid': caregiverUid,
         'linkedAt': FieldValue.serverTimestamp(),
-        'createdByCaregiver': true,
       },
       SetOptions(merge: true),
     );
-    batch.set(
-      _firestore!
-          .collection('patients')
-          .doc(patientUid)
-          .collection('caregivers')
-          .doc(caregiverUid),
-      {
-        'caregiverUid': caregiverUid,
-        'patientUid': patientUid,
-        'patientId': patientId,
-        'name': caregiverData['name'] ?? 'Caregiver',
-        'email': caregiverData['email'] ?? '',
-        'phone': caregiverData['phone'] ?? '',
-        'relationship': 'Caregiver',
-        'permission': NotificationPermission.all.name,
-        'linkedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
-    await batch.commit();
-
-    return {
-      'patientUid': patientUid,
-      'patientId': patientId,
-      'name': name.trim(),
-      'phone': phone.trim(),
-    };
-  }
-
-  Future<bool> linkExistingPatientToCurrentCaregiverByPhone(
-    String phone,
-  ) async {
-    final caregiverUid = currentUid;
-    if (!_enabled || _firestore == null || caregiverUid == null) return false;
-    final normalizedPhone = normalizePhone(phone);
-    final users = await _firestore!
-        .collection('users')
-        .where('role', isEqualTo: 'patient')
-        .where('phoneNormalized', isEqualTo: normalizedPhone)
-        .limit(1)
-        .get();
-    if (users.docs.isEmpty) return false;
-    final userDoc = users.docs.first;
-    final patientUid = userDoc.id;
-    final patientId = userDoc.data()['patientId'] as String?;
-    if (patientId == null) return false;
-    await _firestore!
-        .collection('patientCaregivers')
-        .doc('${patientUid}_$caregiverUid')
-        .set({
-      'patientUid': patientUid,
-      'patientId': patientId,
-      'caregiverUid': caregiverUid,
-      'linkedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    return true;
   }
 
   String normalizePhone(String phone) =>
@@ -1813,14 +1883,21 @@ class FirebaseBackendService {
     String? recipientRole,
   }) async {
     if (!_enabled || _firestore == null) return const [];
-    Query<Map<String, dynamic>> query = _firestore!
+    final snap = await _firestore!
         .collection('sharedReports')
-        .where('recipientId', isEqualTo: recipientId);
-    if (recipientRole != null) {
-      query = query.where('recipientRole', isEqualTo: recipientRole);
-    }
-    final snap = await query.orderBy('createdAt', descending: true).get();
-    return snap.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+        .where('recipientId', isEqualTo: recipientId)
+        .get();
+    final reports = snap.docs
+        .map((doc) => {'id': doc.id, ...doc.data()})
+        .where((report) =>
+            recipientRole == null || report['recipientRole'] == recipientRole)
+        .toList();
+    reports.sort((a, b) {
+      final aDate = _dateFromAny(a['createdAt']) ?? DateTime(1970);
+      final bDate = _dateFromAny(b['createdAt']) ?? DateTime(1970);
+      return bDate.compareTo(aDate);
+    });
+    return reports;
   }
 
   Future<List<Map<String, dynamic>>> fetchDoctorInbox(String doctorUid) async {

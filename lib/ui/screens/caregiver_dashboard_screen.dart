@@ -4,169 +4,290 @@ import 'package:provider/provider.dart';
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/caregiver_provider.dart';
-import 'shared_patient_medications_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
+import 'shared_patient_medications_screen.dart';
+import 'shared_report_detail_screen.dart';
 
-class CaregiverDashboardScreen extends StatelessWidget {
+class CaregiverDashboardScreen extends StatefulWidget {
   const CaregiverDashboardScreen({super.key});
+
+  @override
+  State<CaregiverDashboardScreen> createState() =>
+      _CaregiverDashboardScreenState();
+}
+
+class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final uid = context.read<AuthProvider>().caregiver?.uid;
+    if (uid == null) return;
+    context.read<CaregiverProvider>().listenToCaregiverData(uid);
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final caregiver = auth.caregiver;
     final provider = context.watch<CaregiverProvider>();
-    final urgentAlerts = provider.notifications
-        .where((notification) =>
-            notification.type == 'missedDose' && !notification.acknowledged)
-        .toList();
-    final recentAlerts = provider.notifications.take(8).toList();
-    final sharedReports = provider.sharedReports
+    final caregiver = auth.caregiver;
+    final reports = provider.sharedReports
         .where((report) => report['archived'] != true)
-        .take(5)
         .toList();
 
-    return Scaffold(
-      backgroundColor: AppColors.grayLight,
-      appBar: AppBar(
-        backgroundColor: AppColors.grayLight,
-        elevation: 0,
-        title:
-            const Text('Caregiver Dashboard', style: AppTextStyles.screenTitle),
-        actions: [
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: () => context.read<AuthProvider>().logout(),
-            icon: const Icon(Icons.logout_rounded),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          final uid = context.read<AuthProvider>().caregiver?.uid;
-          if (uid != null) {
-            context.read<CaregiverProvider>().listenToCaregiverData(uid);
-          }
-        },
-        child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          children: [
-            _CaregiverHeader(
-              name: caregiver?.name ?? 'Caregiver',
-              email: caregiver?.email ?? '',
-              unreadCount: provider.unreadCount,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Row(
-              children: [
-                Expanded(
-                  child: MetricTile(
-                    label: 'Patients',
-                    value: '${provider.linkedPatients.length}',
-                    valueColor: AppColors.blue,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: MetricTile(
-                    label: 'Unread',
-                    value: '${provider.unreadCount}',
-                    valueColor: provider.unreadCount > 0
-                        ? AppColors.red
-                        : AppColors.teal,
-                  ),
-                ),
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          backgroundColor: AppColors.pageTint,
+          appBar: AppBar(
+            title: const Text('لوحة المرافق'),
+            actions: [
+              IconButton(
+                tooltip: 'تسجيل الخروج',
+                onPressed: () => context.read<AuthProvider>().logout(),
+                icon: const Icon(Icons.logout_rounded),
+              ),
+            ],
+            bottom: const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.people_outline), text: 'المرضى'),
+                Tab(icon: Icon(Icons.summarize_outlined), text: 'التقارير'),
+                Tab(
+                    icon: Icon(Icons.notifications_outlined),
+                    text: 'التنبيهات'),
               ],
             ),
-            const SizedBox(height: AppSpacing.xl),
-            _SectionHeader(
-              title: 'Needs attention',
-              action: provider.unreadCount == 0
-                  ? null
-                  : TextButton.icon(
-                      onPressed: () =>
-                          context.read<CaregiverProvider>().markAllAsRead(),
-                      icon: const Icon(Icons.done_all_rounded, size: 16),
-                      label: const Text('Mark all read'),
-                    ),
+          ),
+          body: RefreshIndicator(
+            onRefresh: _load,
+            child: TabBarView(
+              children: [
+                _PatientsTab(
+                  caregiverName: caregiver?.name ?? 'مرافق',
+                  caregiverEmail: caregiver?.email ?? '',
+                  patients: provider.linkedPatients,
+                  unreadCount: provider.unreadCount,
+                  reportsCount: reports.length,
+                  onAdd: () => _openPatientAction(context),
+                ),
+                _ReportsTab(
+                  reports: reports,
+                  onReview: provider.markReportReviewed,
+                  onArchive: provider.archiveReport,
+                ),
+                _NotificationsTab(notifications: provider.notifications),
+              ],
             ),
-            if (urgentAlerts.isEmpty)
-              const _QuietPanel()
-            else
-              ...urgentAlerts.map((alert) => _AlertTile(
-                    notification: alert,
-                    prominent: true,
-                    onMarkRead: () => provider.markAsRead(alert.id),
-                  )),
-            const SizedBox(height: AppSpacing.xl),
-            _SectionHeader(
-              title: 'Linked Patients',
-              action: TextButton.icon(
-                onPressed: () => _openPatientAction(context),
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
-                label: const Text('Add'),
-              ),
-            ),
-            if (provider.linkedPatients.isEmpty)
-              const EmptyState(
-                icon: Icons.people_outline_rounded,
-                title: 'No linked patients',
-                subtitle:
-                    'Patients can link you using your registered email address or phone number.',
-              )
-            else
-              ...provider.linkedPatients.map(
-                (patient) => _PatientTile(patient: patient),
-              ),
-            const SizedBox(height: AppSpacing.xl),
-            _SectionHeader(
-              title: 'Shared reports',
-              trailing: AppBadge(
-                label: '${sharedReports.length}',
-                variant: sharedReports.isEmpty
-                    ? BadgeVariant.gray
-                    : BadgeVariant.blue,
-              ),
-            ),
-            if (sharedReports.isEmpty)
-              const EmptyState(
-                icon: Icons.summarize_outlined,
-                title: 'No shared reports',
-                subtitle: 'Patient reports shared with you will appear here.',
-              )
-            else
-              ...sharedReports.map((report) => _ReportTile(
-                    report: report,
-                    onReview: () => provider.markReportReviewed(report['id']),
-                    onArchive: () => provider.archiveReport(report['id']),
-                  )),
-            const SizedBox(height: AppSpacing.xl),
-            _SectionHeader(
-              title: 'Recent inbox',
-              trailing: AppBadge(
-                label: '${provider.unreadCount} unread',
-                variant: provider.unreadCount > 0
-                    ? BadgeVariant.amber
-                    : BadgeVariant.gray,
-              ),
-            ),
-            if (recentAlerts.isEmpty)
-              const EmptyState(
-                icon: Icons.notifications_none_rounded,
-                title: 'No notifications',
-                subtitle: 'Missed-dose alerts will appear here.',
-              )
-            else
-              ...recentAlerts.map((notification) => _AlertTile(
-                    notification: notification,
-                    onMarkRead: notification.acknowledged
-                        ? null
-                        : () => provider.markAsRead(notification.id),
-                  )),
-            const SizedBox(height: AppSpacing.xl),
-          ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _PatientsTab extends StatelessWidget {
+  final String caregiverName;
+  final String caregiverEmail;
+  final List<Map<String, dynamic>> patients;
+  final int unreadCount;
+  final int reportsCount;
+  final VoidCallback onAdd;
+
+  const _PatientsTab({
+    required this.caregiverName,
+    required this.caregiverEmail,
+    required this.patients,
+    required this.unreadCount,
+    required this.reportsCount,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        AppCard(
+          child: Row(
+            children: [
+              const CircleAvatar(
+                radius: 30,
+                backgroundColor: AppColors.tealLight,
+                child: Icon(
+                  Icons.health_and_safety_rounded,
+                  color: AppColors.tealDark,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      caregiverName,
+                      style: AppTextStyles.screenTitle.copyWith(fontSize: 23),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(caregiverEmail, style: AppTextStyles.medDetail),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            Expanded(
+              child: MetricTile(
+                label: 'المرضى',
+                value: '${patients.length}',
+                valueColor: AppColors.teal,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: MetricTile(
+                label: 'تنبيهات',
+                value: '$unreadCount',
+                valueColor: unreadCount > 0 ? AppColors.red : AppColors.green,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        MetricTile(
+          label: 'تقارير مشتركة',
+          value: '$reportsCount',
+          valueColor: AppColors.sky,
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'المرضى',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('إضافة'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        if (patients.isEmpty)
+          const EmptyState(
+            icon: Icons.people_outline_rounded,
+            title: 'لا يوجد مرضى',
+            subtitle: 'أضف مريضا أو اربطه برقم الهاتف',
+          )
+        else
+          ...patients.map(
+            (patient) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: _PatientCard(patient: patient),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ReportsTab extends StatelessWidget {
+  final List<Map<String, dynamic>> reports;
+  final ValueChanged<String> onReview;
+  final ValueChanged<String> onArchive;
+
+  const _ReportsTab({
+    required this.reports,
+    required this.onReview,
+    required this.onArchive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (reports.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: const [
+          EmptyState(
+            icon: Icons.summarize_outlined,
+            title: 'لا توجد تقارير مشتركة',
+            subtitle: 'ستظهر هنا التقارير التي يشاركها المرضى معك.',
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: reports
+          .map(
+            (report) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: _ReportCard(
+                report: report,
+                onOpen: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SharedReportDetailScreen(
+                      report: report,
+                      onReview: () => onReview('${report['id'] ?? ''}'),
+                      onArchive: () => onArchive('${report['id'] ?? ''}'),
+                    ),
+                  ),
+                ),
+                onReview: () => onReview('${report['id'] ?? ''}'),
+                onArchive: () => onArchive('${report['id'] ?? ''}'),
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _NotificationsTab extends StatelessWidget {
+  final List<CaregiverNotification> notifications;
+
+  const _NotificationsTab({required this.notifications});
+
+  @override
+  Widget build(BuildContext context) {
+    if (notifications.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: const [
+          EmptyState(
+            icon: Icons.notifications_outlined,
+            title: 'لا توجد تنبيهات',
+            subtitle: 'ستظهر هنا تنبيهات الجرعات الفائتة.',
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: notifications
+          .take(30)
+          .map(
+            (notification) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: _NotificationCard(notification: notification),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -180,6 +301,7 @@ Future<void> _openPatientAction(BuildContext context) async {
   );
   if (action == null || !context.mounted) return;
   final provider = context.read<CaregiverProvider>();
+  final caregiverUid = context.read<AuthProvider>().caregiver?.uid;
   final ok = action.createNew
       ? await provider.createManagedPatient(
           name: action.name,
@@ -189,21 +311,71 @@ Future<void> _openPatientAction(BuildContext context) async {
           chronicCondition: action.chronicCondition,
         )
       : await provider.linkExistingPatientByPhone(action.phone);
+  if (ok && caregiverUid != null) {
+    provider.listenToCaregiverData(caregiverUid);
+  }
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(ok ? 'Patient added' : 'Could not add patient'),
-    backgroundColor: ok ? AppColors.teal : AppColors.red,
-    behavior: SnackBarBehavior.floating,
-  ));
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(ok ? 'تمت إضافة المريض' : 'تعذرت إضافة المريض'),
+      backgroundColor: ok ? AppColors.teal : AppColors.red,
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
 }
 
-class _ReportTile extends StatelessWidget {
+class _PatientCard extends StatelessWidget {
+  final Map<String, dynamic> patient;
+
+  const _PatientCard({required this.patient});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SharedPatientMedicationsScreen(
+            patient: patient,
+            actorRole: 'caregiver',
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            backgroundColor: AppColors.skyLight,
+            child: Icon(Icons.person_rounded, color: AppColors.sky),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${patient['name'] ?? 'مريض'}',
+                    style: AppTextStyles.medName),
+                const SizedBox(height: 4),
+                Text('${patient['phone'] ?? ''}',
+                    style: AppTextStyles.medDetail),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_left_rounded),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportCard extends StatelessWidget {
   final Map<String, dynamic> report;
+  final VoidCallback onOpen;
   final VoidCallback onReview;
   final VoidCallback onArchive;
 
-  const _ReportTile({
+  const _ReportCard({
     required this.report,
+    required this.onOpen,
     required this.onReview,
     required this.onArchive,
   });
@@ -211,101 +383,48 @@ class _ReportTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = (report['report'] as Map?) ?? const {};
-    final adherence = ((data['adherenceRate'] as num?) ?? 0) * 100;
-    final reviewed = report['reviewedAt'] != null;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: AppCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const CircleAvatar(
-              backgroundColor: AppColors.blueLight,
-              foregroundColor: AppColors.blue,
-              child: Icon(Icons.summarize_outlined),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(report['patientName'] ?? 'Patient',
-                      style: AppTextStyles.medName),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${report['reportType'] ?? 'monthly'} report - ${adherence.round()}% adherence',
-                    style: AppTextStyles.medDetail,
-                  ),
-                  const SizedBox(height: 8),
-                  AppBadge(
-                    label: reviewed ? 'Reviewed' : 'New',
-                    variant: reviewed ? BadgeVariant.green : BadgeVariant.amber,
-                  ),
-                ],
-              ),
-            ),
-            PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'review') onReview();
-                if (value == 'archive') onArchive();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'review', child: Text('Mark reviewed')),
-                PopupMenuItem(value: 'archive', child: Text('Archive')),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+    final adherence = (((data['adherenceRate'] as num?) ?? 0) * 100).round();
+    final patientName = '${report['patientName'] ?? 'مريض'}';
+    final reviewed = report['reviewed'] == true || report['reviewedAt'] != null;
+    final type = '${report['reportType'] ?? data['reportType'] ?? 'monthly'}';
 
-class _CaregiverHeader extends StatelessWidget {
-  final String name;
-  final String email;
-  final int unreadCount;
-
-  const _CaregiverHeader({
-    required this.name,
-    required this.email,
-    required this.unreadCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
     return AppCard(
+      onTap: onOpen,
       child: Row(
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: const BoxDecoration(
-              color: AppColors.tealLight,
-              borderRadius: AppRadius.md,
-            ),
-            child: const Icon(
-              Icons.health_and_safety_outlined,
-              color: AppColors.tealDark,
-            ),
+          const CircleAvatar(
+            backgroundColor: AppColors.tealLight,
+            child: Icon(Icons.summarize_outlined, color: AppColors.teal),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: AppTextStyles.medName),
-                const SizedBox(height: 2),
-                Text(email, style: AppTextStyles.medDetail),
+                Text(patientName, style: AppTextStyles.medName),
+                const SizedBox(height: 4),
+                Text(
+                  type == 'uploaded'
+                      ? '${data['fileName'] ?? data['label'] ?? 'ملف مرفوع'}'
+                      : 'معدل الالتزام $adherence%',
+                  style: AppTextStyles.medDetail,
+                ),
               ],
             ),
           ),
           AppBadge(
-            label: unreadCount > 0 ? 'Active' : 'Clear',
-            variant: unreadCount > 0 ? BadgeVariant.red : BadgeVariant.green,
-            icon: unreadCount > 0
-                ? Icons.notification_important_outlined
-                : Icons.check_circle_outline_rounded,
+            label: reviewed ? 'تمت المراجعة' : 'جديد',
+            variant: reviewed ? BadgeVariant.teal : BadgeVariant.amber,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'review') onReview();
+              if (value == 'archive') onArchive();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'review', child: Text('تمت المراجعة')),
+              PopupMenuItem(value: 'archive', child: Text('أرشفة')),
+            ],
           ),
         ],
       ),
@@ -313,134 +432,34 @@ class _CaregiverHeader extends StatelessWidget {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final Widget? action;
-  final Widget? trailing;
+class _NotificationCard extends StatelessWidget {
+  final CaregiverNotification notification;
 
-  const _SectionHeader({
-    required this.title,
-    this.action,
-    this.trailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        children: [
-          Text(title.toUpperCase(), style: AppTextStyles.sectionLabel),
-          const Spacer(),
-          if (action != null) action!,
-          if (trailing != null) trailing!,
-        ],
-      ),
-    );
-  }
-}
-
-class _QuietPanel extends StatelessWidget {
-  const _QuietPanel();
+  const _NotificationCard({required this.notification});
 
   @override
   Widget build(BuildContext context) {
     return AppCard(
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: const BoxDecoration(
-              color: AppColors.greenLight,
-              borderRadius: AppRadius.md,
-            ),
-            child: const Icon(
-              Icons.check_circle_outline_rounded,
-              color: AppColors.green,
-            ),
+          Icon(
+            notification.acknowledged
+                ? Icons.mark_email_read_outlined
+                : Icons.notification_important_outlined,
+            color:
+                notification.acknowledged ? AppColors.grayMid : AppColors.red,
+            size: 30,
           ),
           const SizedBox(width: AppSpacing.md),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('No missed-dose alerts', style: AppTextStyles.medName),
-                SizedBox(height: 2),
-                Text('Your linked patients are clear right now.',
-                    style: AppTextStyles.medDetail),
-              ],
+          Expanded(
+            child: Text(
+              notification.medicationName == null
+                  ? 'تنبيه جديد'
+                  : 'تنبيه جرعة: ${notification.medicationName}',
+              style: AppTextStyles.medName,
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PatientTile extends StatelessWidget {
-  final Map<String, dynamic> patient;
-
-  const _PatientTile({required this.patient});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: AppCard(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SharedPatientMedicationsScreen(
-              patient: patient,
-              actorRole: 'caregiver',
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            const CircleAvatar(
-              backgroundColor: AppColors.blueLight,
-              foregroundColor: AppColors.blue,
-              child: Icon(Icons.person_outline_rounded),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(patient['name'] ?? 'Patient',
-                      style: AppTextStyles.medName),
-                  const SizedBox(height: 2),
-                  Text(patient['phone'] ?? '', style: AppTextStyles.medDetail),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      AppBadge(
-                        label:
-                            '${(((patient['adherenceRate'] as num?) ?? 0) * 100).round()}% adherence',
-                        variant: BadgeVariant.teal,
-                      ),
-                      if (((patient['missedCount'] as num?) ?? 0) > 0)
-                        AppBadge(
-                          label: '${patient['missedCount']} missed',
-                          variant: BadgeVariant.amber,
-                        ),
-                      if (((patient['refillRisk'] as num?) ?? 0) > 0)
-                        AppBadge(
-                          label: '${patient['refillRisk']} refill risks',
-                          variant: BadgeVariant.red,
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.grayMid),
-          ],
-        ),
       ),
     );
   }
@@ -496,7 +515,7 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
       context,
       _PatientAction(
         createNew: _createNew,
-        name: _nameCtrl.text.trim().isEmpty ? 'Patient' : _nameCtrl.text.trim(),
+        name: _nameCtrl.text.trim().isEmpty ? 'مريض' : _nameCtrl.text.trim(),
         email: _emailCtrl.text.trim().toLowerCase(),
         password: _passwordCtrl.text,
         phone: _phoneCtrl.text.trim(),
@@ -510,210 +529,115 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Add patient',
-              style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: true,
-                  label: Text('Create'),
-                  icon: Icon(Icons.person_add_alt_1_rounded),
-                ),
-                ButtonSegment(
-                  value: false,
-                  label: Text('Link'),
-                  icon: Icon(Icons.link_rounded),
-                ),
-              ],
-              selected: {_createNew},
-              onSelectionChanged: (value) =>
-                  setState(() => _createNew = value.first),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (_createNew) ...[
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Patient name',
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
-                ),
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter patient name'
-                    : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Patient email',
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
-                ),
-                validator: (value) {
-                  if (!_createNew) return null;
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Enter patient email';
-                  }
-                  if (!value.contains('@')) return 'Enter a valid email';
-                  return null;
-                },
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _passwordCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Patient password',
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
-                ),
-                validator: (value) {
-                  if (!_createNew) return null;
-                  if (value == null || value.length < 6) {
-                    return 'Password must be at least 6 characters';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-            TextFormField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: InputDecoration(
-                labelText:
-                    _createNew ? 'Patient phone' : 'Existing patient phone',
-                border: const OutlineInputBorder(borderRadius: AppRadius.md),
-              ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Enter patient phone'
-                  : null,
-            ),
-            if (_createNew) ...[
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _conditionCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Chronic condition (optional)',
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
-                ),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.xl),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _submit,
-                icon: const Icon(Icons.check_rounded),
-                label: Text(_createNew ? 'Create patient' : 'Link patient'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AlertTile extends StatelessWidget {
-  final CaregiverNotification notification;
-  final bool prominent;
-  final VoidCallback? onMarkRead;
-
-  const _AlertTile({
-    required this.notification,
-    this.prominent = false,
-    this.onMarkRead,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isMissedDose = notification.type == 'missedDose';
-    final title = isMissedDose ? 'Missed medication' : 'Caregiver linked';
-    final body = notification.medicationName == null
-        ? notification.caregiverName
-        : '${notification.caregiverName} missed ${notification.medicationName}';
-    final color = notification.acknowledged
-        ? AppColors.grayMid
-        : prominent
-            ? AppColors.red
-            : AppColors.amber;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: AppCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: AppRadius.md,
-              ),
-              child: Icon(
-                notification.acknowledged
-                    ? Icons.mark_email_read_outlined
-                    : Icons.notification_important_outlined,
-                color: color,
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.88,
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: _formKey,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(title, style: AppTextStyles.medName),
+                  Text(
+                    'إضافة مريض',
+                    style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: true,
+                        label: Text('إنشاء'),
+                        icon: Icon(Icons.person_add_alt_1_rounded),
                       ),
-                      AppBadge(
-                        label: notification.acknowledged ? 'Read' : 'New',
-                        variant: notification.acknowledged
-                            ? BadgeVariant.gray
-                            : BadgeVariant.red,
+                      ButtonSegment(
+                        value: false,
+                        label: Text('ربط'),
+                        icon: Icon(Icons.link_rounded),
                       ),
                     ],
+                    selected: {_createNew},
+                    onSelectionChanged: (value) =>
+                        setState(() => _createNew = value.first),
                   ),
-                  const SizedBox(height: 4),
-                  Text(body, style: AppTextStyles.medDetail),
-                  const SizedBox(height: 6),
-                  Text(_relativeTime(notification.sentAt),
-                      style: AppTextStyles.medDetail),
+                  const SizedBox(height: AppSpacing.md),
+                  if (_createNew) ...[
+                    _field(_nameCtrl, 'اسم المريض', Icons.person_outline),
+                    _field(
+                      _emailCtrl,
+                      'بريد المريض',
+                      Icons.email_outlined,
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (value) =>
+                          value == null || !value.contains('@')
+                              ? 'أدخل بريد صحيح'
+                              : null,
+                    ),
+                    _field(
+                      _passwordCtrl,
+                      'كلمة المرور',
+                      Icons.lock_outline_rounded,
+                      obscure: true,
+                      validator: (value) => value == null || value.length < 6
+                          ? 'كلمة المرور 6 أحرف على الأقل'
+                          : null,
+                    ),
+                  ],
+                  _field(
+                    _phoneCtrl,
+                    _createNew ? 'هاتف المريض' : 'هاتف المريض الحالي',
+                    Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
+                  ),
+                  if (_createNew)
+                    _field(
+                      _conditionCtrl,
+                      'الحالة المزمنة (اختياري)',
+                      Icons.medical_information_outlined,
+                      required: false,
+                    ),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _submit,
+                    icon: const Icon(Icons.check_rounded),
+                    label: Text(_createNew ? 'إنشاء المريض' : 'ربط المريض'),
+                  ),
                 ],
               ),
             ),
-            if (onMarkRead != null) ...[
-              const SizedBox(width: AppSpacing.sm),
-              IconButton(
-                tooltip: 'Mark as read',
-                icon: const Icon(Icons.done_rounded),
-                onPressed: onMarkRead,
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
   }
 
-  String _relativeTime(DateTime date) {
-    final diff = DateTime.now().difference(date.toLocal());
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours} hr ago';
-    return '${diff.inDays} d ago';
+  Widget _field(
+    TextEditingController controller,
+    String label,
+    IconData icon, {
+    bool obscure = false,
+    bool required = true,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: TextFormField(
+        controller: controller,
+        obscureText: obscure,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+        validator: validator ??
+            (value) => required && (value == null || value.trim().isEmpty)
+                ? 'هذا الحقل مطلوب'
+                : null,
+      ),
+    );
   }
 }

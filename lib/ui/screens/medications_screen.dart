@@ -1,64 +1,60 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../widgets/shared_widgets.dart';
-import '../theme/app_theme.dart';
-import '../../providers/providers.dart';
+
 import '../../models/models.dart';
+import '../../providers/providers.dart';
 import '../../services/firebase_backend_service.dart';
 import '../../services/notification_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class MedicationsScreen extends StatelessWidget {
   const MedicationsScreen({super.key});
 
-  Future<void> _openMedicationForm(BuildContext context,
-      {Medication? med}) async {
+  Future<void> _openMedicationForm(
+    BuildContext context, {
+    Medication? med,
+  }) async {
     final auth = context.read<AuthProvider>();
-    final medProv = context.read<MedicationProvider>();
-    final adhProv = context.read<AdherenceProvider>();
+    final medProvider = context.read<MedicationProvider>();
+    final adherence = context.read<AdherenceProvider>();
     final saved = await showModalBottomSheet<Medication>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => MedicationFormSheet(
-        initialMedication: med,
-        isArabic: auth.arabicMode,
-      ),
+      builder: (_) => MedicationFormSheet(initialMedication: med),
     );
-
     if (saved == null || auth.patient == null) return;
 
     try {
       if (med == null) {
-        await medProv.addMedication(
+        await medProvider.addMedication(
           auth.patient!.id,
           saved,
-          isArabic: auth.arabicMode,
+          isArabic: true,
         );
       } else {
         await NotificationService().cancelMedicationReminders(med);
-        await medProv.updateMedication(
+        await medProvider.updateMedication(
           auth.patient!.id,
           saved,
-          isArabic: auth.arabicMode,
+          isArabic: true,
         );
       }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Saved locally, but cloud sync failed. Please try again online.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم الحفظ محلياً، وتعذر المزامنة حالياً'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
 
     try {
       await NotificationService().scheduleMedicationReminders(
         saved,
-        isArabic: auth.arabicMode,
+        isArabic: true,
       );
       await FirebaseBackendService().logReminderEvent(
         patientId: auth.patient!.id,
@@ -74,210 +70,289 @@ class MedicationsScreen extends StatelessWidget {
     } catch (e) {
       debugPrint('Medication reminder scheduling skipped: $e');
     }
-    await adhProv.loadAndGenerate(
+
+    await adherence.loadAndGenerate(
       patientId: auth.patient!.id,
-      medications: medProv.medications,
+      medications: medProvider.medications,
       patientName: auth.patient!.name,
       caregivers: auth.caregivers,
       caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-      isArabic: auth.arabicMode,
+      isArabic: true,
     );
   }
 
   Future<void> _deleteMedication(BuildContext context, Medication med) async {
-    final medProv = context.read<MedicationProvider>();
-    final adhProv = context.read<AdherenceProvider>();
     final auth = context.read<AuthProvider>();
+    final medProvider = context.read<MedicationProvider>();
+    final adherence = context.read<AdherenceProvider>();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(auth.arabicMode ? 'حذف الدواء؟' : 'Delete medication?'),
-        content: Text(
-          auth.arabicMode
-              ? 'سيتم حذف ${med.displayNameAr} من قائمتك.'
-              : '${med.displayName} will be removed from your list.',
-        ),
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف الدواء؟'),
+        content: Text('سيتم حذف ${med.displayNameAr} من قائمتك.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(auth.arabicMode ? 'إلغاء' : 'Cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.red),
-            child: Text(auth.arabicMode ? 'حذف' : 'Delete'),
+            child: const Text('حذف'),
           ),
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed != true || auth.patient == null) return;
 
-    await medProv.deleteMedication(med.id);
+    await medProvider.deleteMedication(med.id);
     await NotificationService().cancelMedicationReminders(med);
-    if (auth.patient != null) {
-      await FirebaseBackendService().logReminderEvent(
-        patientId: auth.patient!.id,
-        medicationId: med.id,
-        eventType: 'reminderCancelled',
-        source: 'patient',
-        details: {
-          'reason': 'medicationDeleted',
-          'reminderType': med.reminderType.name,
-        },
-      );
-    }
-    if (auth.patient != null && context.mounted) {
-      await adhProv.loadAndGenerate(
-        patientId: auth.patient!.id,
-        medications: medProv.medications,
-        patientName: auth.patient!.name,
-        caregivers: auth.caregivers,
-        caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-        isArabic: auth.arabicMode,
-      );
-    }
+    await adherence.loadAndGenerate(
+      patientId: auth.patient!.id,
+      medications: medProvider.medications,
+      patientName: auth.patient!.name,
+      caregivers: auth.caregivers,
+      caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
+      isArabic: true,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final medProv = context.watch<MedicationProvider>();
-    final isAr = auth.arabicMode;
+    final medProvider = context.watch<MedicationProvider>();
 
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
+      backgroundColor: AppColors.pageTint,
       appBar: AppBar(
-        backgroundColor: AppColors.grayLight,
-        title: Text(
-          isAr ? 'أدويتي' : 'My Medications',
-          style: AppTextStyles.screenTitle,
-        ),
+        backgroundColor: AppColors.pageTint,
         elevation: 0,
         centerTitle: false,
+        title: Text(
+          'أدويتي',
+          style: AppTextStyles.screenTitle.copyWith(fontSize: 26),
+        ),
       ),
-      body: medProv.isLoading
+      body: medProvider.isLoading
           ? const Center(child: CircularProgressIndicator())
-          : medProv.isEmpty
+          : medProvider.isEmpty
               ? EmptyState(
                   icon: Icons.medication_outlined,
-                  title:
-                      isAr ? 'لم تقم بإضافة أدوية بعد' : 'No medications yet',
-                  subtitle: isAr
-                      ? 'أضف اسم الدواء والجرعة وأوقات التذكير'
-                      : 'Add each medication with its dose and reminder times',
+                  title: 'لا توجد أدوية بعد',
+                  subtitle: 'اضغط زر إضافة دواء لإدخال أول دواء',
+                  action: FilledButton.icon(
+                    onPressed: () => _openMedicationForm(context),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('إضافة دواء'),
+                  ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  itemCount: medProv.medications.length,
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 100),
+                  itemCount: medProvider.medications.length,
                   itemBuilder: (context, index) {
-                    final med = medProv.medications[index];
-                    final isPaused = med.status == MedicationStatus.paused;
+                    final med = medProvider.medications[index];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: AppCard(
+                      child: _MedicationCard(
+                        medication: med,
                         onTap: () => _openMedicationForm(context, med: med),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            MedIconBubble(medicationId: med.id, size: 48),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    isAr ? med.displayNameAr : med.displayName,
-                                    style: AppTextStyles.medName,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    med.reminderTimes
-                                        .map((t) => t.display)
-                                        .join(', '),
-                                    style: AppTextStyles.medDetail,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 6,
-                                    runSpacing: 6,
-                                    children: [
-                                      AppBadge(
-                                        label: isAr
-                                            ? med.formLabelAr
-                                            : med.formLabel,
-                                        variant: BadgeVariant.teal,
-                                      ),
-                                      AppBadge(
-                                        label: isPaused
-                                            ? (isAr ? 'متوقف مؤقتاً' : 'Paused')
-                                            : (isAr ? 'نشط' : 'Active'),
-                                        variant: isPaused
-                                            ? BadgeVariant.amber
-                                            : BadgeVariant.green,
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuButton<String>(
-                              onSelected: (value) async {
-                                if (value == 'edit') {
-                                  await _openMedicationForm(context, med: med);
-                                } else if (value == 'pause') {
-                                  await medProv.pauseMedication(
-                                      auth.patient!.id, med.id);
-                                  await NotificationService()
-                                      .cancelMedicationReminders(med);
-                                } else if (value == 'resume') {
-                                  await medProv.resumeMedication(
-                                      auth.patient!.id, med.id);
-                                  final updated = medProv.findById(med.id);
-                                  if (updated != null) {
-                                    await NotificationService()
-                                        .scheduleMedicationReminders(
-                                      updated,
-                                      isArabic: isAr,
-                                    );
-                                  }
-                                } else if (value == 'delete') {
-                                  await _deleteMedication(context, med);
-                                }
-                              },
-                              itemBuilder: (_) => [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text(isAr ? 'تعديل' : 'Edit'),
-                                ),
-                                PopupMenuItem(
-                                  value: isPaused ? 'resume' : 'pause',
-                                  child: Text(
-                                    isPaused
-                                        ? (isAr ? 'استئناف' : 'Resume')
-                                        : (isAr ? 'إيقاف مؤقت' : 'Pause'),
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text(isAr ? 'حذف' : 'Delete'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                        onEdit: () => _openMedicationForm(context, med: med),
+                        onDelete: () => _deleteMedication(context, med),
+                        onPauseResume: () async {
+                          if (auth.patient == null) return;
+                          if (med.status == MedicationStatus.paused) {
+                            await medProvider.resumeMedication(
+                              auth.patient!.id,
+                              med.id,
+                            );
+                            final updated = medProvider.findById(med.id);
+                            if (updated != null) {
+                              await NotificationService()
+                                  .scheduleMedicationReminders(
+                                updated,
+                                isArabic: true,
+                              );
+                            }
+                          } else {
+                            await medProvider.pauseMedication(
+                              auth.patient!.id,
+                              med.id,
+                            );
+                            await NotificationService()
+                                .cancelMedicationReminders(med);
+                          }
+                        },
                       ),
                     );
                   },
                 ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.teal,
-        icon: const Icon(Icons.add, color: AppColors.white),
-        label: Text(
-          isAr ? 'إضافة دواء' : 'Add Med',
-          style: const TextStyle(color: AppColors.white),
-        ),
+        foregroundColor: AppColors.white,
         onPressed: () => _openMedicationForm(context),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('إضافة دواء'),
       ),
+    );
+  }
+}
+
+class _MedicationCard extends StatelessWidget {
+  final Medication medication;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final VoidCallback onPauseResume;
+
+  const _MedicationCard({
+    required this.medication,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onPauseResume,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final paused = medication.status == MedicationStatus.paused;
+    final notes = (medication.notesAr ?? medication.notes ?? '').trim();
+    final indication = medication.indicationAr.trim().isNotEmpty
+        ? medication.indicationAr.trim()
+        : medication.indication.trim();
+    final daysLeft = medication.estimatedDaysRemaining;
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MedIconBubble(medicationId: medication.id, size: 58),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      medication.displayNameAr,
+                      style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${medication.formLabelAr} • ${medication.dosage}',
+                      style: AppTextStyles.medDetail.copyWith(fontSize: 15),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'edit') onEdit();
+                  if (value == 'pause') onPauseResume();
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'edit', child: Text('تعديل')),
+                  PopupMenuItem(
+                    value: 'pause',
+                    child: Text(paused ? 'استئناف' : 'إيقاف مؤقت'),
+                  ),
+                  const PopupMenuItem(value: 'delete', child: Text('حذف')),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _InfoLine(
+            icon: Icons.today_outlined,
+            text: 'الجرعات اليومية: ${_formatNumber(medication.dosesPerDay)}',
+          ),
+          const SizedBox(height: 8),
+          _InfoLine(
+            icon: Icons.schedule_rounded,
+            text:
+                'الأوقات: ${medication.reminderTimes.map((time) => time.display).join('، ')}',
+          ),
+          if (indication.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _InfoLine(
+              icon: Icons.info_outline_rounded,
+              text: 'الاستخدام: $indication',
+            ),
+          ],
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _InfoLine(
+              icon: Icons.notes_rounded,
+              text: 'ملاحظات: $notes',
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              AppBadge(
+                label: paused ? 'متوقف مؤقتاً' : 'نشط',
+                variant: paused ? BadgeVariant.amber : BadgeVariant.green,
+              ),
+              if (medication.quantityRemaining > 0)
+                AppBadge(
+                  label: 'المتبقي ${medication.quantityRemaining} جرعة',
+                  variant: BadgeVariant.blue,
+                  icon: Icons.inventory_2_outlined,
+                ),
+              if (medication.quantityRemaining > 0)
+                AppBadge(
+                  label: 'يكفي ${daysLeft.ceil()} يوم',
+                  variant: medication.needsRefill
+                      ? BadgeVariant.amber
+                      : BadgeVariant.teal,
+                  icon: Icons.event_available_outlined,
+                ),
+              if (medication.needsRefill)
+                const AppBadge(
+                  label: 'قربت التعبئة',
+                  variant: BadgeVariant.red,
+                  icon: Icons.warning_amber_rounded,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatNumber(double value) {
+    if (value == value.roundToDouble()) return value.toInt().toString();
+    return value.toStringAsFixed(1);
+  }
+}
+
+class _InfoLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _InfoLine({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.grayMid, size: 21),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: AppTextStyles.medDetail.copyWith(
+              color: AppColors.grayDark,
+              fontSize: 15,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -285,10 +360,11 @@ class MedicationsScreen extends StatelessWidget {
 class MedicationFormSheet extends StatefulWidget {
   final Medication? initialMedication;
   final bool isArabic;
+
   const MedicationFormSheet({
     super.key,
-    required this.isArabic,
     this.initialMedication,
+    this.isArabic = true,
   });
 
   @override
@@ -301,13 +377,12 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
   late final TextEditingController _nameArCtrl;
   late final TextEditingController _dosageCtrl;
   late final TextEditingController _conditionCtrl;
-  late final TextEditingController _notesCtrl;
   late final TextEditingController _quantityCtrl;
   late final TextEditingController _dosesPerDayCtrl;
-  late final TextEditingController _refillThresholdCtrl;
+  late final TextEditingController _notesCtrl;
   late MedicationForm _form;
-  late ReminderType _reminderType;
   late MedicationStatus _status;
+  late ReminderType _reminderType;
   late List<ReminderTime> _times;
 
   @override
@@ -317,17 +392,15 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
     _nameCtrl = TextEditingController(text: med?.name ?? '');
     _nameArCtrl = TextEditingController(text: med?.nameAr ?? '');
     _dosageCtrl = TextEditingController(text: med?.dosage ?? '');
-    _conditionCtrl = TextEditingController(text: med?.indication ?? '');
-    _notesCtrl = TextEditingController(text: med?.notes ?? '');
+    _conditionCtrl = TextEditingController(text: med?.indicationAr ?? '');
     _quantityCtrl =
         TextEditingController(text: (med?.quantityRemaining ?? 0).toString());
     _dosesPerDayCtrl =
         TextEditingController(text: (med?.dosesPerDay ?? 1).toString());
-    _refillThresholdCtrl =
-        TextEditingController(text: (med?.refillThreshold ?? 7).toString());
+    _notesCtrl = TextEditingController(text: med?.notesAr ?? med?.notes ?? '');
     _form = med?.form ?? MedicationForm.tablet;
-    _reminderType = med?.reminderType ?? ReminderType.notification;
     _status = med?.status ?? MedicationStatus.active;
+    _reminderType = med?.reminderType ?? ReminderType.notification;
     _times =
         List.of(med?.reminderTimes ?? [const ReminderTime(hour: 8, minute: 0)]);
   }
@@ -338,10 +411,9 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
     _nameArCtrl.dispose();
     _dosageCtrl.dispose();
     _conditionCtrl.dispose();
-    _notesCtrl.dispose();
     _quantityCtrl.dispose();
     _dosesPerDayCtrl.dispose();
-    _refillThresholdCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
@@ -362,235 +434,260 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
     if (!_formKey.currentState!.validate()) return;
     final existing = widget.initialMedication;
     final name = _nameCtrl.text.trim();
-    final med = Medication(
-      id: existing?.id ?? 'MED-${DateTime.now().millisecondsSinceEpoch}',
-      name: name,
-      nameAr: _nameArCtrl.text.trim().isEmpty ? name : _nameArCtrl.text.trim(),
-      dosage: _dosageCtrl.text.trim(),
-      form: _form,
-      indication: _conditionCtrl.text.trim(),
-      indicationAr: _conditionCtrl.text.trim(),
-      reminderTimes: _times,
-      reminderType: _reminderType,
-      status: _status,
-      startDate: existing?.startDate ?? DateTime.now(),
-      quantityRemaining: int.tryParse(_quantityCtrl.text.trim()) ?? 0,
-      dosesPerDay: double.tryParse(_dosesPerDayCtrl.text.trim()) ?? 1,
-      refillThreshold: int.tryParse(_refillThresholdCtrl.text.trim()) ?? 7,
-      notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+    final nameAr =
+        _nameArCtrl.text.trim().isEmpty ? name : _nameArCtrl.text.trim();
+    Navigator.pop(
+      context,
+      Medication(
+        id: existing?.id ?? 'MED-${DateTime.now().millisecondsSinceEpoch}',
+        name: name,
+        nameAr: nameAr,
+        dosage: _dosageCtrl.text.trim(),
+        form: _form,
+        indication: _conditionCtrl.text.trim(),
+        indicationAr: _conditionCtrl.text.trim(),
+        reminderTimes: _times,
+        reminderType: _reminderType,
+        status: _status,
+        startDate: existing?.startDate ?? DateTime.now(),
+        quantityRemaining: int.tryParse(_quantityCtrl.text.trim()) ?? 0,
+        dosesPerDay: double.tryParse(_dosesPerDayCtrl.text.trim()) ?? 1,
+        refillThreshold: 3,
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        notesAr: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      ),
     );
-    Navigator.pop(context, med);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isAr = widget.isArabic;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
-      child: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.initialMedication == null
-                    ? (isAr ? 'إضافة دواء' : 'Add medication')
-                    : (isAr ? 'تعديل الدواء' : 'Edit medication'),
-                style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: InputDecoration(
-                  labelText: isAr ? 'اسم الدواء' : 'Medication name',
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.88,
+        ),
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.initialMedication == null
+                      ? 'إضافة دواء'
+                      : 'تعديل الدواء',
+                  style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
                 ),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? (isAr ? 'أدخل اسم الدواء' : 'Enter a name')
-                    : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _nameArCtrl,
-                decoration: InputDecoration(
-                  labelText: isAr
-                      ? 'الاسم العربي (اختياري)'
-                      : 'Arabic name (optional)',
+                const SizedBox(height: AppSpacing.lg),
+                _textField(
+                  controller: _nameCtrl,
+                  label: 'اسم الدواء',
+                  icon: Icons.medication_rounded,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'أدخل اسم الدواء'
+                      : null,
                 ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _dosageCtrl,
-                decoration: InputDecoration(
-                  labelText: isAr ? 'الجرعة، مثال 500mg' : 'Dosage, e.g. 500mg',
+                _textField(
+                  controller: _nameArCtrl,
+                  label: 'الاسم بالعربية (اختياري)',
+                  icon: Icons.translate_rounded,
                 ),
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? (isAr ? 'أدخل الجرعة' : 'Enter a dosage')
-                    : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<MedicationForm>(
-                value: _form,
-                decoration: InputDecoration(labelText: isAr ? 'الشكل' : 'Form'),
-                items: MedicationForm.values
-                    .map((form) => DropdownMenuItem(
+                _textField(
+                  controller: _dosageCtrl,
+                  label: 'الجرعة، مثال 500mg',
+                  icon: Icons.straighten_rounded,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'أدخل الجرعة'
+                      : null,
+                ),
+                DropdownButtonFormField<MedicationForm>(
+                  value: _form,
+                  decoration: const InputDecoration(
+                    labelText: 'شكل الدواء',
+                    prefixIcon: Icon(Icons.category_outlined),
+                    border: OutlineInputBorder(borderRadius: AppRadius.md),
+                  ),
+                  items: MedicationForm.values
+                      .map(
+                        (form) => DropdownMenuItem(
                           value: form,
-                          child: Text(_formLabel(form, isAr)),
-                        ))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => _form = value);
-                },
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _conditionCtrl,
-                decoration: InputDecoration(
-                  labelText:
-                      isAr ? 'يستخدم لـ (اختياري)' : 'Used for (optional)',
+                          child: Text(_formLabel(form)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => _form = value);
+                  },
                 ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              SectionLabel(isAr ? 'أوقات التذكير' : 'Reminder times'),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (var i = 0; i < _times.length; i++)
-                    InputChip(
-                      label: Text(_times[i].display),
-                      avatar: const Icon(Icons.schedule_rounded, size: 16),
-                      onPressed: () => _pickTime(i),
-                      onDeleted: _times.length == 1
-                          ? null
-                          : () => setState(() => _times.removeAt(i)),
+                const SizedBox(height: AppSpacing.md),
+                _textField(
+                  controller: _conditionCtrl,
+                  label: 'يستخدم لـ (اختياري)',
+                  icon: Icons.info_outline_rounded,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                const SectionLabel('أوقات التذكير'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (var i = 0; i < _times.length; i++)
+                      InputChip(
+                        label: Text(_times[i].display),
+                        avatar: const Icon(Icons.schedule_rounded, size: 16),
+                        onPressed: () => _pickTime(i),
+                        onDeleted: _times.length == 1
+                            ? null
+                            : () => setState(() => _times.removeAt(i)),
+                      ),
+                    ActionChip(
+                      avatar: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('إضافة وقت'),
+                      onPressed: () => setState(
+                        () => _times.add(
+                          const ReminderTime(hour: 20, minute: 0),
+                        ),
+                      ),
                     ),
-                  ActionChip(
-                    avatar: const Icon(Icons.add_rounded, size: 16),
-                    label: Text(isAr ? 'إضافة وقت' : 'Add time'),
-                    onPressed: () => setState(() {
-                      _times.add(const ReminderTime(hour: 20, minute: 0));
-                    }),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              SegmentedButton<MedicationStatus>(
-                segments: [
-                  ButtonSegment(
-                    value: MedicationStatus.active,
-                    label: Text(isAr ? 'نشط' : 'Active'),
-                  ),
-                  ButtonSegment(
-                    value: MedicationStatus.paused,
-                    label: Text(isAr ? 'متوقف' : 'Paused'),
-                  ),
-                ],
-                selected: {_status},
-                onSelectionChanged: (selected) =>
-                    setState(() => _status = selected.first),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<ReminderType>(
-                value: _reminderType,
-                decoration: InputDecoration(
-                  labelText: isAr ? 'نوع التذكير' : 'Reminder type',
+                  ],
                 ),
-                items: ReminderType.values
-                    .map((type) => DropdownMenuItem(
-                          value: type,
-                          child: Text(_reminderTypeLabel(type, isAr)),
-                        ))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => _reminderType = value);
-                },
-              ),
-              const SizedBox(height: AppSpacing.md),
-              SectionLabel(isAr ? 'المخزون' : 'Inventory'),
-              const SizedBox(height: AppSpacing.sm),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _quantityCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: isAr ? 'الكمية المتبقية' : 'Quantity left',
+                const SizedBox(height: AppSpacing.lg),
+                SegmentedButton<MedicationStatus>(
+                  segments: const [
+                    ButtonSegment(
+                      value: MedicationStatus.active,
+                      label: Text('نشط'),
+                    ),
+                    ButtonSegment(
+                      value: MedicationStatus.paused,
+                      label: Text('متوقف'),
+                    ),
+                  ],
+                  selected: {_status},
+                  onSelectionChanged: (selected) =>
+                      setState(() => _status = selected.first),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                DropdownButtonFormField<ReminderType>(
+                  value: _reminderType,
+                  decoration: const InputDecoration(
+                    labelText: 'نوع التذكير',
+                    prefixIcon: Icon(Icons.notifications_active_outlined),
+                    border: OutlineInputBorder(borderRadius: AppRadius.md),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: ReminderType.notification,
+                      child: Text('إشعار'),
+                    ),
+                    DropdownMenuItem(
+                      value: ReminderType.alarm,
+                      child: Text('منبه'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _reminderType = value);
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _textField(
+                        controller: _quantityCtrl,
+                        label: 'الكمية',
+                        icon: Icons.inventory_2_outlined,
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: _textField(
+                        controller: _dosesPerDayCtrl,
+                        label: 'جرعات/يوم',
+                        icon: Icons.today_outlined,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const InfoBanner(
+                  message:
+                      'سيذكرك التطبيق تلقائيا عندما يبقى من الدواء 3 أيام ثم يوم واحد.',
+                  color: AppColors.teal,
+                  icon: Icons.notifications_active_outlined,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _textField(
+                  controller: _notesCtrl,
+                  label: 'ملاحظات (اختياري)',
+                  icon: Icons.notes_rounded,
+                  minLines: 2,
+                  maxLines: 3,
+                ),
+                const SizedBox(height: AppSpacing.xl),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.check_rounded),
+                    label: const Text('حفظ الدواء'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(54),
+                      textStyle: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _dosesPerDayCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: isAr ? 'جرعات يوميا' : 'Doses/day',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _refillThresholdCtrl,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText:
-                      isAr ? 'حد تنبيه إعادة التعبئة' : 'Refill threshold days',
                 ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _notesCtrl,
-                decoration: InputDecoration(
-                  labelText: isAr ? 'ملاحظات (اختياري)' : 'Notes (optional)',
-                ),
-                minLines: 2,
-                maxLines: 3,
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.check_rounded),
-                  label: Text(isAr ? 'حفظ الدواء' : 'Save medication'),
-                  style:
-                      FilledButton.styleFrom(backgroundColor: AppColors.teal),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  String _formLabel(MedicationForm form, bool isAr) {
-    if (!isAr) return form.name;
-    return switch (form) {
-      MedicationForm.tablet => 'قرص',
-      MedicationForm.capsule => 'كبسولة',
-      MedicationForm.liquid => 'سائل',
-      MedicationForm.injection => 'حقنة',
-      MedicationForm.drops => 'قطرات',
-      MedicationForm.inhaler => 'بخاخ',
-      MedicationForm.patch => 'لصقة',
-      MedicationForm.other => 'أخرى',
-    };
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? Function(String?)? validator,
+    TextInputType? keyboardType,
+    int minLines = 1,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: TextFormField(
+        controller: controller,
+        validator: validator,
+        keyboardType: keyboardType,
+        minLines: minLines,
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon),
+          border: const OutlineInputBorder(borderRadius: AppRadius.md),
+        ),
+      ),
+    );
   }
 
-  String _reminderTypeLabel(ReminderType type, bool isAr) {
-    if (!isAr) return type.name;
-    return switch (type) {
-      ReminderType.notification => 'إشعار',
-      ReminderType.alarm => 'منبه',
-    };
-  }
+  String _formLabel(MedicationForm form) => switch (form) {
+        MedicationForm.tablet => 'قرص',
+        MedicationForm.capsule => 'كبسولة',
+        MedicationForm.liquid => 'سائل',
+        MedicationForm.injection => 'حقنة',
+        MedicationForm.drops => 'قطرات',
+        MedicationForm.inhaler => 'بخاخ',
+        MedicationForm.patch => 'لصقة',
+        MedicationForm.other => 'أخرى',
+      };
 }

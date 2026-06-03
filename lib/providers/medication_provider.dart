@@ -183,13 +183,7 @@ class MedicationProvider extends ChangeNotifier {
     if (medication.quantityRemaining <= 0 || medication.dosesPerDay <= 0) {
       return null;
     }
-    final days = medication.estimatedDaysRemaining;
-    for (final milestone in const [1, 3, 7]) {
-      if (milestone <= medication.refillThreshold && days <= milestone) {
-        return milestone;
-      }
-    }
-    return null;
+    return medication.refillMilestone;
   }
 
   Future<void> _syncMedicationCloudSideEffects({

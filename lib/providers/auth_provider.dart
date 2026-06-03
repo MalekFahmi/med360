@@ -33,7 +33,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isCaregiver => _role == AccountRole.caregiver;
   bool get isDoctor => _role == AccountRole.doctor;
 
-  bool get arabicMode => true;
+  bool get arabicMode => _patient?.arabicMode ?? true;
   bool get largeFonts => _patient?.largeFonts ?? false;
   bool get highContrast => _patient?.highContrast ?? false;
   bool get caregiverAlertsEnabled => _patient?.caregiverAlertsEnabled ?? true;
@@ -66,9 +66,7 @@ class AuthProvider extends ChangeNotifier {
       final firebasePatient = await backend.currentPatient();
       if (firebasePatient != null) {
         final localPatient = await _db.getPatientById(firebasePatient.id);
-        final patient = (localPatient ?? firebasePatient).copyWith(
-          arabicMode: true,
-        );
+        final patient = localPatient ?? firebasePatient;
         if (localPatient == null) {
           await _db.insertPatient(patient);
         }
@@ -117,7 +115,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (password.length < 6) {
-        _errorMessage = 'Password must be at least 6 characters.';
+        _errorMessage = 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -126,7 +124,7 @@ class AuthProvider extends ChangeNotifier {
       // Check phone not already registered locally.
       final existing = await _db.getPatientByPhone(phone);
       if (existing != null) {
-        _errorMessage = 'This phone number is already registered.';
+        _errorMessage = 'رقم الهاتف مسجل مسبقاً.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -167,7 +165,7 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       debugPrint('Patient sign up failed: $e');
-      _errorMessage = _friendlyAuthError(e, fallback: 'Sign up failed.');
+      _errorMessage = _friendlyAuthError(e, fallback: 'فشل إنشاء الحساب.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -185,14 +183,14 @@ class AuthProvider extends ChangeNotifier {
       PatientUser? p = await _db.getPatientByPhone(phone);
       final hasLocalPassword = p != null && p.passwordHash.isNotEmpty;
       if (hasLocalPassword && p.passwordHash != _hashPassword(password)) {
-        _errorMessage = 'Incorrect phone number or password.';
+        _errorMessage = 'رقم الهاتف أو كلمة المرور غير صحيحة.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
       }
 
       if (p == null && !backend.isEnabled) {
-        _errorMessage = 'Incorrect phone number or password.';
+        _errorMessage = 'رقم الهاتف أو كلمة المرور غير صحيحة.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -200,7 +198,7 @@ class AuthProvider extends ChangeNotifier {
 
       p ??= PatientUser(
         id: 'PAT-${DateTime.now().millisecondsSinceEpoch}',
-        name: 'Patient',
+        name: 'مريض',
         phone: phone,
         passwordHash: _hashPassword(password),
         caregivers: const [],
@@ -213,7 +211,7 @@ class AuthProvider extends ChangeNotifier {
       );
       final cloudPatient =
           await backend.currentPatient(passwordHash: _hashPassword(password));
-      p = (cloudPatient ?? p).copyWith(arabicMode: true);
+      p = cloudPatient ?? p;
       await _db.insertPatient(p);
       try {
         await backend.registerPatientDevice(p);
@@ -233,7 +231,7 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       debugPrint('Patient login failed: $e');
-      _errorMessage = _friendlyAuthError(e, fallback: 'Login failed.');
+      _errorMessage = _friendlyAuthError(e, fallback: 'فشل تسجيل الدخول.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -266,7 +264,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (password.length < 6) {
-        _errorMessage = 'Password must be at least 6 characters.';
+        _errorMessage = 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -288,7 +286,7 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _errorMessage =
-          _friendlyAuthError(e, fallback: 'Caregiver sign up failed.');
+          _friendlyAuthError(e, fallback: 'فشل إنشاء حساب المرافق.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -319,7 +317,7 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _errorMessage =
-          _friendlyAuthError(e, fallback: 'Caregiver login failed.');
+          _friendlyAuthError(e, fallback: 'فشل تسجيل دخول المرافق.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -340,7 +338,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (password.length < 6) {
-        _errorMessage = 'Password must be at least 6 characters.';
+        _errorMessage = 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.';
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return false;
@@ -363,7 +361,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = _friendlyAuthError(e, fallback: 'Doctor sign up failed.');
+      _errorMessage = _friendlyAuthError(e, fallback: 'فشل إنشاء حساب الطبيب.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -393,7 +391,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = _friendlyAuthError(e, fallback: 'Doctor login failed.');
+      _errorMessage = _friendlyAuthError(e, fallback: 'فشل تسجيل دخول الطبيب.');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -435,7 +433,7 @@ class AuthProvider extends ChangeNotifier {
     final registered =
         await FirebaseBackendService().findCaregiverByEmail(email);
     if (registered == null) {
-      _errorMessage = 'No registered caregiver was found for that email.';
+      _errorMessage = 'لم يتم العثور على مرافق مسجل بهذا البريد.';
       notifyListeners();
       return false;
     }
@@ -458,8 +456,7 @@ class AuthProvider extends ChangeNotifier {
     final registered =
         await FirebaseBackendService().findCaregiverByPhone(phone);
     if (registered == null) {
-      _errorMessage =
-          'No registered caregiver account was found for that phone number.';
+      _errorMessage = 'لم يتم العثور على حساب مرافق مسجل بهذا الرقم.';
       notifyListeners();
       return false;
     }
@@ -479,7 +476,7 @@ class AuthProvider extends ChangeNotifier {
       await addCaregiver(caregiver);
       return true;
     } catch (e) {
-      _errorMessage = 'Could not link caregiver. Please try again.';
+      _errorMessage = 'تعذر ربط المرافق. حاول مرة أخرى.';
       notifyListeners();
       return false;
     }
@@ -507,7 +504,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       final doctor = await FirebaseBackendService().findDoctorByEmail(email);
       if (doctor == null) {
-        _errorMessage = 'No registered doctor was found for that email.';
+        _errorMessage = 'لم يتم العثور على طبيب مسجل بهذا البريد.';
         notifyListeners();
         return false;
       }
@@ -523,8 +520,7 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       debugPrint('Doctor link failed: $e');
-      _errorMessage =
-          'Could not link doctor. Please try again after Firestore rules are updated.';
+      _errorMessage = 'تعذر ربط الطبيب. حاول مرة أخرى.';
       notifyListeners();
       return false;
     }
@@ -564,27 +560,27 @@ class AuthProvider extends ChangeNotifier {
   String _friendlyAuthError(Object error, {required String fallback}) {
     final raw = error.toString();
     if (raw.contains('weak-password')) {
-      return 'Password must be at least 6 characters.';
+      return 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.';
     }
     if (raw.contains('email-already-in-use')) {
-      return 'This account already exists. Try logging in.';
+      return 'هذا الحساب موجود مسبقاً. جرّب تسجيل الدخول.';
     }
     if (raw.contains('phone number is already registered')) {
-      return 'This phone number is already registered. Please log in with the original password.';
+      return 'رقم الهاتف مسجل مسبقاً. سجل الدخول بكلمة المرور الأصلية.';
     }
     if (raw.contains('too-many-requests')) {
-      return 'Firebase temporarily blocked requests from this device. Wait a few minutes, then try again.';
+      return 'حظر Firebase الطلبات مؤقتاً من هذا الجهاز. انتظر قليلاً ثم حاول مرة أخرى.';
     }
     if (raw.contains('invalid-credential') ||
         raw.contains('wrong-password') ||
         raw.contains('user-not-found')) {
-      return 'Incorrect credentials.';
+      return 'بيانات الدخول غير صحيحة.';
     }
     if (raw.contains('network-request-failed')) {
-      return 'Network error. Check your connection and try again.';
+      return 'خطأ في الشبكة. تحقق من الاتصال وحاول مرة أخرى.';
     }
     if (raw.contains('Firebase is not initialized')) {
-      return 'Firebase is not configured for this build.';
+      return 'Firebase غير مهيأ لهذا الإصدار.';
     }
     return fallback;
   }

@@ -25,6 +25,7 @@ import 'ui/screens/caregiver_screen.dart';
 import 'ui/screens/caregiver_dashboard_screen.dart';
 import 'ui/screens/doctor_dashboard_screen.dart';
 import 'ui/screens/settings_screen.dart';
+import 'ui/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,11 +55,65 @@ class Med360App extends StatelessWidget {
           return MaterialApp(
             title: 'MED360',
             debugShowCheckedModeBanner: false,
-            locale: const Locale('ar', 'LY'),
-            supportedLocales: const [
-              Locale('ar', 'LY'),
-              Locale('en', 'US'),
-            ],
+            theme: ThemeData(
+              useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: AppColors.teal,
+                primary: AppColors.teal,
+                secondary: AppColors.sky,
+                surface: AppColors.white,
+              ),
+              scaffoldBackgroundColor: AppColors.pageTint,
+              fontFamily: 'Roboto',
+              appBarTheme: const AppBarTheme(
+                backgroundColor: AppColors.pageTint,
+                foregroundColor: AppColors.navy,
+                elevation: 0,
+                centerTitle: false,
+              ),
+              filledButtonTheme: FilledButtonThemeData(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.teal,
+                  foregroundColor: AppColors.white,
+                  minimumSize: const Size(0, 52),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: AppRadius.md,
+                  ),
+                ),
+              ),
+              outlinedButtonTheme: OutlinedButtonThemeData(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 52),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: AppRadius.md,
+                  ),
+                ),
+              ),
+              inputDecorationTheme: const InputDecorationTheme(
+                border: OutlineInputBorder(borderRadius: AppRadius.md),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+              ),
+              navigationBarTheme: NavigationBarThemeData(
+                backgroundColor: AppColors.white,
+                indicatorColor: AppColors.tealLight,
+                labelTextStyle: WidgetStateProperty.all(
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            locale: auth.arabicMode
+                ? const Locale('ar', 'LY')
+                : const Locale('en', 'US'),
+            supportedLocales: const [Locale('ar', 'LY'), Locale('en', 'US')],
             localizationsDelegates: const [
               GlobalMaterialLocalizations.delegate,
               GlobalWidgetsLocalizations.delegate,
@@ -66,7 +121,8 @@ class Med360App extends StatelessWidget {
             ],
             builder: (context, child) {
               return Directionality(
-                textDirection: TextDirection.rtl,
+                textDirection:
+                    auth.arabicMode ? TextDirection.rtl : TextDirection.ltr,
                 child: child!,
               );
             },
@@ -84,9 +140,9 @@ class _AppRouter extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     return switch (auth.status) {
-      AuthStatus.initial ||
-      AuthStatus.loading =>
-        const Scaffold(body: Center(child: CircularProgressIndicator())),
+      AuthStatus.initial || AuthStatus.loading => const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        ),
       AuthStatus.authenticated => auth.isDoctor
           ? const DoctorShell()
           : auth.isCaregiver
@@ -176,7 +232,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     MedicationsScreen(),
     AdherenceScreen(),
     CaregiverScreen(),
-    SettingsScreen()
+    SettingsScreen(),
   ];
 
   @override
@@ -319,10 +375,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         medicationId: medication.id,
         eventType: 'snoozedReminder',
         source: 'notification',
-        details: {
-          'scheduledTime': scheduledTime,
-          'snoozeMinutes': 5,
-        },
+        details: {'scheduledTime': scheduledTime, 'snoozeMinutes': 5},
       );
       return;
     }
@@ -333,10 +386,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         medicationId: medicationId,
         eventType: 'alarmDismissed',
         source: 'notificationAction',
-        details: {
-          'scheduledTime': scheduledTime,
-          'doseId': dose?.id,
-        },
+        details: {'scheduledTime': scheduledTime, 'doseId': dose?.id},
       );
     }
   }
@@ -383,8 +433,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     );
 
     if (!auth.caregiverAlertsEnabled) return;
-    final caregiverIds =
-        adherenceProvider.caregiverIdsForMissedDoseAlerts(auth.caregivers);
+    final caregiverIds = adherenceProvider.caregiverIdsForMissedDoseAlerts(
+      auth.caregivers,
+    );
     if (caregiverIds.isEmpty) return;
 
     for (final dose in missedDoses) {
@@ -416,6 +467,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
+        backgroundColor: AppColors.white,
+        indicatorColor: AppColors.skyLight,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) {
           setState(() => _currentIndex = i);
@@ -423,23 +477,28 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         },
         destinations: [
           NavigationDestination(
-            icon: const Icon(Icons.home),
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home_rounded),
             label: isAr ? 'الرئيسية' : 'Home',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.medication),
+            icon: const Icon(Icons.medication_outlined),
+            selectedIcon: const Icon(Icons.medication_rounded),
             label: isAr ? 'أدويتي' : 'Meds',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.bar_chart),
+            icon: const Icon(Icons.bar_chart_outlined),
+            selectedIcon: const Icon(Icons.bar_chart_rounded),
             label: isAr ? 'التقارير' : 'Reports',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.people),
+            icon: const Icon(Icons.people_outline),
+            selectedIcon: const Icon(Icons.people_rounded),
             label: isAr ? 'الرعاية' : 'Care',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings_outlined),
+            selectedIcon: const Icon(Icons.settings_rounded),
             label: isAr ? 'الإعدادات' : 'Settings',
           ),
         ],

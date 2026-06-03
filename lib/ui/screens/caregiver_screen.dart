@@ -25,14 +25,16 @@ class CaregiverScreen extends StatelessWidget {
         );
 
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Caregiver account linked'
-          : context.read<AuthProvider>().errorMessage ??
-              'No caregiver account was found for that email'),
-      backgroundColor: ok ? AppColors.teal : AppColors.red,
-      behavior: SnackBarBehavior.floating,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'تم ربط حساب المرافق'
+            : context.read<AuthProvider>().errorMessage ??
+                'لم يتم العثور على مرافق بهذا البريد'),
+        backgroundColor: ok ? AppColors.teal : AppColors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -41,55 +43,49 @@ class CaregiverScreen extends StatelessWidget {
     final caregivers = auth.caregivers;
 
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
-      appBar: AppBar(
-        backgroundColor: AppColors.grayLight,
-        title: const Text('Care Team', style: AppTextStyles.screenTitle),
-        elevation: 0,
-        centerTitle: false,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AppCard(
-              child: ToggleRow(
-                title: 'Caregiver Alerts',
-                subtitle:
-                    'Notify linked caregiver accounts if a dose is missed',
-                value: auth.caregiverAlertsEnabled,
-                onChanged: (_) => auth.toggleCaregiverAlerts(),
+      backgroundColor: AppColors.pageTint,
+      appBar: AppBar(title: const Text('فريق الرعاية')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          AppCard(
+            child: ToggleRow(
+              title: 'تنبيهات المرافقين',
+              subtitle: 'إرسال تنبيه للمرافق عند تفويت جرعة',
+              value: auth.caregiverAlertsEnabled,
+              onChanged: (_) => auth.toggleCaregiverAlerts(),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Row(
+            children: [
+              Text(
+                'المرافقون',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _addCaregiver(context),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('ربط'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (caregivers.isEmpty)
+            const EmptyState(
+              icon: Icons.people_outline_rounded,
+              title: 'لا يوجد مرافقون',
+              subtitle: 'اربط حساب مرافق لمتابعة التنبيهات',
+            )
+          else
+            ...caregivers.map(
+              (caregiver) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: _CaregiverCard(caregiver: caregiver),
               ),
             ),
-            const SizedBox(height: AppSpacing.xl),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const SectionLabel('Linked Caregiver Accounts'),
-                TextButton.icon(
-                  onPressed: () => _addCaregiver(context),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Link'),
-                ),
-              ],
-            ),
-            if (caregivers.isEmpty)
-              const EmptyState(
-                icon: Icons.people_outline_rounded,
-                title: 'No linked caregiver accounts',
-                subtitle:
-                    'Ask the caregiver to sign up first, then link them with their registered email address',
-              )
-            else
-              ...caregivers.map(
-                (caregiver) => Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: _CaregiverCard(caregiver: caregiver),
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -97,14 +93,15 @@ class CaregiverScreen extends StatelessWidget {
 
 class _CaregiverCard extends StatelessWidget {
   final Caregiver caregiver;
+
   const _CaregiverCard({required this.caregiver});
 
   @override
   Widget build(BuildContext context) {
     final permissionLabel = switch (caregiver.permission) {
-      NotificationPermission.all => 'Full Access',
-      NotificationPermission.missedDoseOnly => 'Alerts Only',
-      NotificationPermission.none => 'Muted',
+      NotificationPermission.all => 'وصول كامل',
+      NotificationPermission.missedDoseOnly => 'تنبيهات فقط',
+      NotificationPermission.none => 'بدون تنبيهات',
     };
     final variant = switch (caregiver.permission) {
       NotificationPermission.all => BadgeVariant.blue,
@@ -116,6 +113,7 @@ class _CaregiverCard extends StatelessWidget {
       child: Row(
         children: [
           CircleAvatar(
+            radius: 28,
             backgroundColor: AppColors.tealLight,
             foregroundColor: AppColors.tealDark,
             child: Text(caregiver.initials),
@@ -126,8 +124,9 @@ class _CaregiverCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(caregiver.name, style: AppTextStyles.medName),
+                const SizedBox(height: 4),
                 Text(
-                  '${caregiver.relationship} - ${caregiver.email ?? caregiver.phone}',
+                  caregiver.email ?? caregiver.phone,
                   style: AppTextStyles.medDetail,
                 ),
                 const SizedBox(height: 8),
@@ -158,10 +157,10 @@ class _CaregiverCard extends StatelessWidget {
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'missed', child: Text('Alerts only')),
-              PopupMenuItem(value: 'all', child: Text('Full access')),
-              PopupMenuItem(value: 'none', child: Text('Mute')),
-              PopupMenuItem(value: 'remove', child: Text('Remove')),
+              PopupMenuItem(value: 'missed', child: Text('تنبيهات فقط')),
+              PopupMenuItem(value: 'all', child: Text('وصول كامل')),
+              PopupMenuItem(value: 'none', child: Text('بدون تنبيهات')),
+              PopupMenuItem(value: 'remove', child: Text('إزالة')),
             ],
           ),
         ],
@@ -212,26 +211,25 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Link caregiver account',
-                style: AppTextStyles.screenTitle.copyWith(fontSize: 20),
+                'ربط مرافق',
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
-                  labelText: 'Caregiver registered email',
+                  labelText: 'بريد المرافق',
                   prefixIcon: Icon(Icons.email_outlined),
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Enter the caregiver email';
+                    return 'أدخل بريد المرافق';
                   }
-                  if (!value.contains('@')) return 'Enter a valid email';
+                  if (!value.contains('@')) return 'أدخل بريد صحيح';
                   return null;
                 },
               ),
@@ -239,33 +237,29 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
               TextFormField(
                 controller: _relationCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Relationship',
+                  labelText: 'صلة القرابة',
                   prefixIcon: Icon(Icons.people_outline_rounded),
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
                 ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter a relationship'
+                    ? 'أدخل صلة القرابة'
                     : null,
               ),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<NotificationPermission>(
                 value: _permission,
-                decoration: const InputDecoration(
-                  labelText: 'Permission',
-                  border: OutlineInputBorder(borderRadius: AppRadius.md),
-                ),
+                decoration: const InputDecoration(labelText: 'الصلاحية'),
                 items: const [
                   DropdownMenuItem(
                     value: NotificationPermission.missedDoseOnly,
-                    child: Text('Alerts only'),
+                    child: Text('تنبيهات فقط'),
                   ),
                   DropdownMenuItem(
                     value: NotificationPermission.all,
-                    child: Text('Full access'),
+                    child: Text('وصول كامل'),
                   ),
                   DropdownMenuItem(
                     value: NotificationPermission.none,
-                    child: Text('Muted'),
+                    child: Text('بدون تنبيهات'),
                   ),
                 ],
                 onChanged: (value) {
@@ -273,15 +267,10 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
                 },
               ),
               const SizedBox(height: AppSpacing.xl),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.link_rounded),
-                  label: const Text('Link caregiver account'),
-                  style:
-                      FilledButton.styleFrom(backgroundColor: AppColors.teal),
-                ),
+              FilledButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.link_rounded),
+                label: const Text('ربط المرافق'),
               ),
             ],
           ),

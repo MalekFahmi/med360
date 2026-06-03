@@ -217,9 +217,9 @@ class NotificationService {
         const ReminderTime(hour: 0, minute: 0),
         'refill',
       ),
-      title: isArabic ? 'تذكير إعادة التعبئة' : 'Refill reminder',
+      title: isArabic ? 'تذكير تعبئة الدواء' : 'Refill reminder',
       body: isArabic
-          ? '${medication.displayNameAr} متبق له ${medication.estimatedDaysRemaining.ceil()} يوم.'
+          ? '${medication.displayNameAr} يكفي ${medication.estimatedDaysRemaining.ceil()} يوم فقط.'
           : '${medication.displayName} has ${medication.estimatedDaysRemaining.ceil()} days remaining.',
       notificationDetails: _reminderDetails(),
     );

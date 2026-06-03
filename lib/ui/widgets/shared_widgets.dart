@@ -8,11 +8,12 @@ class AppBadge extends StatelessWidget {
   final String label;
   final BadgeVariant variant;
   final IconData? icon;
-  const AppBadge(
-      {super.key,
-      required this.label,
-      this.variant = BadgeVariant.teal,
-      this.icon});
+  const AppBadge({
+    super.key,
+    required this.label,
+    this.variant = BadgeVariant.teal,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -25,15 +26,18 @@ class AppBadge extends StatelessWidget {
       BadgeVariant.gray => (AppColors.grayLight, AppColors.grayMid),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(color: bg, borderRadius: AppRadius.pill),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (icon != null) ...[
-          Icon(icon, size: 11, color: fg),
-          const SizedBox(width: 3)
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 15, color: fg),
+            const SizedBox(width: 5),
+          ],
+          Text(label, style: AppTextStyles.badgeText.copyWith(color: fg)),
         ],
-        Text(label, style: AppTextStyles.badgeText.copyWith(color: fg)),
-      ]),
+      ),
     );
   }
 
@@ -57,21 +61,24 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inner = Padding(
-        padding: padding ?? const EdgeInsets.all(AppSpacing.lg), child: child);
+      padding: padding ?? const EdgeInsets.all(AppSpacing.lg),
+      child: child,
+    );
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: AppRadius.lg,
-        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+        borderRadius: AppRadius.md,
+        border: Border.all(color: Colors.black.withValues(alpha: 0.045)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2))
+            color: Colors.black.withValues(alpha: 0.045),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
         ],
       ),
       child: onTap != null
-          ? InkWell(onTap: onTap, borderRadius: AppRadius.lg, child: inner)
+          ? InkWell(onTap: onTap, borderRadius: AppRadius.md, child: inner)
           : inner,
     );
   }
@@ -159,8 +166,9 @@ class _SkeletonBoxState extends State<SkeletonBox>
   void initState() {
     super.initState();
     _c = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
     _a = Tween(begin: 0.4, end: 1.0).animate(_c);
   }
 
@@ -172,13 +180,16 @@ class _SkeletonBoxState extends State<SkeletonBox>
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-      opacity: _a,
-      child: Container(
+        opacity: _a,
+        child: Container(
           height: widget.height,
           width: widget.width ?? double.infinity,
           decoration: BoxDecoration(
-              color: AppColors.grayLight,
-              borderRadius: widget.radius ?? AppRadius.sm)));
+            color: AppColors.grayLight,
+            borderRadius: widget.radius ?? AppRadius.sm,
+          ),
+        ),
+      );
 }
 
 // ── Metric tile ───────────────────────────────────────────────────────────────
@@ -186,23 +197,33 @@ class MetricTile extends StatelessWidget {
   final String label;
   final String value;
   final Color valueColor;
-  const MetricTile(
-      {super.key,
-      required this.label,
-      required this.value,
-      this.valueColor = AppColors.grayDark});
+  const MetricTile({
+    super.key,
+    required this.label,
+    required this.value,
+    this.valueColor = AppColors.grayDark,
+  });
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: const BoxDecoration(
-            color: AppColors.grayLight, borderRadius: AppRadius.md),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: AppTextStyles.metricLabel),
-          const SizedBox(height: 2),
-          Text(value,
-              style: AppTextStyles.metricValue
-                  .copyWith(fontSize: 22, color: valueColor)),
-        ]),
+          color: AppColors.grayLight,
+          borderRadius: AppRadius.md,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: AppTextStyles.metricLabel),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              style: AppTextStyles.metricValue.copyWith(
+                fontSize: 26,
+                color: valueColor,
+              ),
+            ),
+          ],
+        ),
       );
 }
 
@@ -212,29 +233,35 @@ class ToggleRow extends StatelessWidget {
   final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const ToggleRow(
-      {super.key,
-      required this.title,
-      this.subtitle,
-      required this.value,
-      required this.onChanged});
+  const ToggleRow({
+    super.key,
+    required this.title,
+    this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-        child: Row(children: [
-          Expanded(
+        child: Row(
+          children: [
+            Expanded(
               child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(title, style: const TextStyle(fontSize: 14)),
-                if (subtitle != null)
-                  Text(subtitle!, style: AppTextStyles.medDetail),
-              ])),
-          Switch(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 17)),
+                  if (subtitle != null)
+                    Text(subtitle!, style: AppTextStyles.medDetail),
+                ],
+              ),
+            ),
+            Switch(
               value: value,
               onChanged: onChanged,
-              activeTrackColor: AppColors.teal),
-        ]),
+              activeTrackColor: AppColors.teal,
+            ),
+          ],
+        ),
       );
 }
 
@@ -245,52 +272,78 @@ class DoseActionButton extends StatelessWidget {
   final DoseButtonState state;
   final VoidCallback? onTake;
   final VoidCallback? onMiss;
-  const DoseActionButton(
-      {super.key, required this.state, this.onTake, this.onMiss});
+  const DoseActionButton({
+    super.key,
+    required this.state,
+    this.onTake,
+    this.onMiss,
+  });
 
   @override
   Widget build(BuildContext context) => switch (state) {
-        DoseButtonState.taken => _chip('Taken', Icons.check_rounded,
-            AppColors.greenLight, const Color(0xFF27500A)),
+        DoseButtonState.taken => _chip(
+            'Taken',
+            Icons.check_rounded,
+            AppColors.greenLight,
+            const Color(0xFF27500A),
+          ),
         DoseButtonState.missed => _chip(
-            'Missed', Icons.close_rounded, AppColors.redLight, AppColors.red),
-        DoseButtonState.pending =>
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            FilledButton.icon(
+            'Missed',
+            Icons.close_rounded,
+            AppColors.redLight,
+            AppColors.red,
+          ),
+        DoseButtonState.pending => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.icon(
                 onPressed: onTake,
                 icon: const Icon(Icons.check_rounded, size: 14),
                 label: const Text('Take', style: TextStyle(fontSize: 12)),
                 style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.teal,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap)),
-            const SizedBox(width: 6),
-            OutlinedButton.icon(
+                  backgroundColor: AppColors.teal,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 6),
+              OutlinedButton.icon(
                 onPressed: onMiss,
                 icon: const Icon(Icons.close_rounded, size: 14),
                 label: const Text('Miss', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.red,
-                    side: const BorderSide(color: AppColors.red),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap)),
-          ]),
+                  foregroundColor: AppColors.red,
+                  side: const BorderSide(color: AppColors.red),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
       };
 
   Widget _chip(String l, IconData i, Color bg, Color fg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(color: bg, borderRadius: AppRadius.pill),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(i, size: 13, color: fg),
-          const SizedBox(width: 4),
-          Text(l,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(i, size: 13, color: fg),
+            const SizedBox(width: 4),
+            Text(
+              l,
               style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500, color: fg))
-        ]),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: fg,
+              ),
+            ),
+          ],
+        ),
       );
 }
 
@@ -299,25 +352,30 @@ class InfoBanner extends StatelessWidget {
   final String message;
   final Color color;
   final IconData icon;
-  const InfoBanner(
-      {super.key,
-      required this.message,
-      required this.color,
-      required this.icon});
+  const InfoBanner({
+    super.key,
+    required this.message,
+    required this.color,
+    required this.icon,
+  });
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: AppRadius.md,
-            border: Border.all(color: color.withValues(alpha: 0.3))),
-        child: Row(children: [
-          Icon(icon, color: color, size: 16),
-          const SizedBox(width: 10),
-          Expanded(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: AppRadius.md,
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
               child:
-                  Text(message, style: TextStyle(fontSize: 12, color: color)))
-        ]),
+                  Text(message, style: TextStyle(fontSize: 12, color: color)),
+            ),
+          ],
+        ),
       );
 }
 
@@ -327,35 +385,49 @@ class EmptyState extends StatelessWidget {
   final String title;
   final String? subtitle;
   final Widget? action;
-  const EmptyState(
-      {super.key,
-      required this.icon,
-      required this.title,
-      this.subtitle,
-      this.action});
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.action,
+  });
   @override
   Widget build(BuildContext context) => Center(
-      child: Padding(
+        child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xxl),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
                 width: 72,
                 height: 72,
                 decoration: const BoxDecoration(
-                    color: AppColors.tealLight, borderRadius: AppRadius.lg),
-                child: Icon(icon, size: 36, color: AppColors.teal)),
-            const SizedBox(height: AppSpacing.lg),
-            Text(title,
-                style: AppTextStyles.screenTitle.copyWith(fontSize: 17),
-                textAlign: TextAlign.center),
-            if (subtitle != null) ...[
-              const SizedBox(height: 6),
-              Text(subtitle!,
-                  style: AppTextStyles.screenSub, textAlign: TextAlign.center)
-            ],
-            if (action != null) ...[
+                  color: AppColors.tealLight,
+                  borderRadius: AppRadius.lg,
+                ),
+                child: Icon(icon, size: 36, color: AppColors.teal),
+              ),
               const SizedBox(height: AppSpacing.lg),
-              action!
+              Text(
+                title,
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 17),
+                textAlign: TextAlign.center,
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  subtitle!,
+                  style: AppTextStyles.screenSub,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              if (action != null) ...[
+                const SizedBox(height: AppSpacing.lg),
+                action!,
+              ],
             ],
-          ])));
+          ),
+        ),
+      );
 }

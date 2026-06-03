@@ -144,6 +144,16 @@ service cloud.firestore {
       allow delete: if isPatientOwner(patientUid);
     }
 
+    match /patientAccountRequests/{requestId} {
+      allow create: if isCaregiverUser()
+        && request.resource.data.caregiverUid == request.auth.uid;
+
+      allow read: if isCaregiverUser()
+        && resource.data.caregiverUid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
     match /patients/{patientUid} {
 
       // Allow authenticated users to create their own patient document

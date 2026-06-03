@@ -92,7 +92,7 @@ class ReportProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> shareCurrentReport({
+  Future<bool> shareCurrentReport({
     required String patientId,
     required String patientName,
     required String recipientRole,
@@ -100,7 +100,7 @@ class ReportProvider extends ChangeNotifier {
     String reportType = 'monthly',
   }) async {
     final report = _reportPayload(reportType);
-    if (report == null) return;
+    if (report == null) return false;
     await FirebaseBackendService().shareReport(
       patientId: patientId,
       patientName: patientName,
@@ -109,6 +109,7 @@ class ReportProvider extends ChangeNotifier {
       reportType: reportType,
       report: report,
     );
+    return true;
   }
 
   Uint8List? exportCurrentMonthPdfBytes({

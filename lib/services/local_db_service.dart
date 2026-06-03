@@ -337,8 +337,7 @@ class LocalDbService {
             : null,
         chronicCondition: row['chronicCondition'],
         caregivers: caregivers,
-        arabicMode:
-            row['arabicMode'] == null ? true : row['arabicMode'] == 1,
+        arabicMode: row['arabicMode'] == null ? true : row['arabicMode'] == 1,
         largeFonts: row['largeFonts'] == 1,
         highContrast: row['highContrast'] == 1,
         caregiverAlertsEnabled: row['caregiverAlertsEnabled'] == 1,
@@ -541,7 +540,8 @@ class LocalDbService {
     final d = await db;
     final rows = await d.query(
       'refill_events',
-      where: 'patientId = ? AND medicationId = ? AND milestone = ?',
+      where:
+          'patientId = ? AND medicationId = ? AND milestone = ? AND completedAt IS NULL',
       whereArgs: [patientId, medicationId, milestone],
       limit: 1,
     );

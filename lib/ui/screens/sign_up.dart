@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:med360/ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import '../widgets/shared_widgets.dart';
+
 import '../../providers/providers.dart';
+import '../theme/app_theme.dart';
+import '../widgets/shared_widgets.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onLoginTap;
   final AccountRole selectedRole;
   final ValueChanged<AccountRole> onRoleChanged;
+
   const SignupScreen({
     super.key,
     required this.onLoginTap,
@@ -28,10 +30,11 @@ class _SignupScreenState extends State<SignupScreen> {
   final _condCtrl = TextEditingController();
   final _specialtyCtrl = TextEditingController();
   final _licenseCtrl = TextEditingController();
+  DateTime? _dob;
   bool _obscure = true;
+
   bool get _caregiverMode => widget.selectedRole == AccountRole.caregiver;
   bool get _doctorMode => widget.selectedRole == AccountRole.doctor;
-  DateTime? _dob;
 
   @override
   void dispose() {
@@ -43,6 +46,16 @@ class _SignupScreenState extends State<SignupScreen> {
     _specialtyCtrl.dispose();
     _licenseCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDob() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(1980),
+      firstDate: DateTime(1920),
+      lastDate: DateTime.now().subtract(const Duration(days: 365)),
+    );
+    if (picked != null) setState(() => _dob = picked);
   }
 
   Future<void> _submit() async {
@@ -60,14 +73,14 @@ class _SignupScreenState extends State<SignupScreen> {
       AccountRole.caregiver => await auth.registerCaregiver(
           name: _nameCtrl.text.trim(),
           email: _emailCtrl.text.trim(),
-          phone: _phoneCtrl.text.trim(),
           password: _passCtrl.text,
+          phone: _phoneCtrl.text.trim(),
         ),
       AccountRole.doctor => await auth.registerDoctor(
           name: _nameCtrl.text.trim(),
           email: _emailCtrl.text.trim(),
-          phone: _phoneCtrl.text.trim(),
           password: _passCtrl.text,
+          phone: _phoneCtrl.text.trim(),
           specialty: _specialtyCtrl.text.trim(),
           licenseNumber: _licenseCtrl.text.trim().isEmpty
               ? null
@@ -75,276 +88,175 @@ class _SignupScreenState extends State<SignupScreen> {
         ),
     };
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            Text(context.read<AuthProvider>().errorMessage ?? 'Sign up failed'),
-        backgroundColor: AppColors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.md),
-        margin: const EdgeInsets.all(AppSpacing.lg),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              context.read<AuthProvider>().errorMessage ?? 'فشل إنشاء الحساب'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-  }
-
-  Future<void> _pickDob() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime(1980),
-      firstDate: DateTime(1920),
-      lastDate: DateTime.now().subtract(const Duration(days: 365)),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-            colorScheme: const ColorScheme.light(primary: AppColors.teal)),
-        child: child!,
-      ),
-    );
-    if (picked != null) setState(() => _dob = picked);
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-
     return Scaffold(
-      backgroundColor: AppColors.grayLight,
+      backgroundColor: AppColors.pageTint,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Form(
-              key: _formKey,
-              child: Column(children: [
-                // Logo
-                Container(
-                  width: 68,
-                  height: 68,
-                  decoration: const BoxDecoration(
-                      color: AppColors.teal, borderRadius: AppRadius.lg),
-                  child: const Icon(Icons.medication_rounded,
-                      color: AppColors.white, size: 36),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text('MED360',
-                    style: AppTextStyles.screenTitle.copyWith(fontSize: 24)),
-                const SizedBox(height: 4),
-                const Text('Your personal medication reminder',
-                    style: AppTextStyles.screenSub),
-                const SizedBox(height: AppSpacing.xxl),
-
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const _SignupHeader(),
+                const SizedBox(height: AppSpacing.xl),
                 AppCard(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text('Create account',
-                          style:
-                              AppTextStyles.screenTitle.copyWith(fontSize: 18)),
-                      const SizedBox(height: AppSpacing.lg),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                       SegmentedButton<AccountRole>(
                         segments: const [
                           ButtonSegment(
-                              value: AccountRole.patient,
-                              label: Text('Patient'),
-                              icon: Icon(Icons.person_outline_rounded)),
+                            value: AccountRole.patient,
+                            label: Text('مريض'),
+                            icon: Icon(Icons.person_outline_rounded),
+                          ),
                           ButtonSegment(
-                              value: AccountRole.caregiver,
-                              label: Text('Caregiver'),
-                              icon: Icon(Icons.health_and_safety_outlined)),
+                            value: AccountRole.caregiver,
+                            label: Text('مرافق'),
+                            icon: Icon(Icons.health_and_safety_outlined),
+                          ),
                           ButtonSegment(
-                              value: AccountRole.doctor,
-                              label: Text('Doctor'),
-                              icon: Icon(Icons.local_hospital_outlined)),
+                            value: AccountRole.doctor,
+                            label: Text('طبيب'),
+                            icon: Icon(Icons.local_hospital_outlined),
+                          ),
                         ],
                         selected: {widget.selectedRole},
                         onSelectionChanged: (value) =>
                             widget.onRoleChanged(value.first),
                       ),
-                      const SizedBox(height: AppSpacing.md),
-
-                      // Name
-                      TextFormField(
+                      const SizedBox(height: AppSpacing.lg),
+                      _field(
                         controller: _nameCtrl,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: _inputDec(
-                            'Full name', Icons.person_outline_rounded),
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Please enter your name'
-                            : null,
+                        label: 'الاسم الكامل',
+                        icon: Icons.person_outline_rounded,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                                ? 'أدخل الاسم'
+                                : null,
                       ),
-                      const SizedBox(height: AppSpacing.md),
-
-                      if (_caregiverMode || _doctorMode) ...[
-                        TextFormField(
+                      if (_caregiverMode || _doctorMode)
+                        _field(
                           controller: _emailCtrl,
+                          label: 'البريد الإلكتروني',
+                          icon: Icons.email_outlined,
                           keyboardType: TextInputType.emailAddress,
-                          decoration:
-                              _inputDec('Email address', Icons.email_outlined),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Please enter your email';
+                          validator: (value) =>
+                              value == null || !value.contains('@')
+                                  ? 'أدخل بريد صحيح'
+                                  : null,
+                        ),
+                      if (_doctorMode) ...[
+                        _field(
+                          controller: _specialtyCtrl,
+                          label: 'التخصص الطبي',
+                          icon: Icons.medical_services_outlined,
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                                  ? 'أدخل التخصص'
+                                  : null,
+                        ),
+                        _field(
+                          controller: _licenseCtrl,
+                          label: 'رقم الترخيص (اختياري)',
+                          icon: Icons.badge_outlined,
+                        ),
+                      ],
+                      _field(
+                        controller: _phoneCtrl,
+                        label: 'رقم الهاتف',
+                        icon: Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                        validator: (value) =>
+                            value == null || value.trim().length < 7
+                                ? 'أدخل رقم هاتف صحيح'
+                                : null,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: TextFormField(
+                          controller: _passCtrl,
+                          obscureText: _obscure,
+                          decoration: InputDecoration(
+                            labelText: 'كلمة المرور',
+                            prefixIcon: const Icon(Icons.lock_outline_rounded),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'أدخل كلمة المرور';
                             }
-                            if (!v.contains('@')) {
-                              return 'Enter a valid email address';
+                            if (value.length < 6) {
+                              return 'كلمة المرور 6 أحرف على الأقل';
                             }
                             return null;
                           },
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-
-                      if (_doctorMode) ...[
-                        TextFormField(
-                          controller: _specialtyCtrl,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: _inputDec('Medical specialty',
-                              Icons.medical_services_outlined),
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Please enter your specialty'
-                              : null,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        TextFormField(
-                          controller: _licenseCtrl,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: _inputDec('License number (optional)',
-                              Icons.badge_outlined),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-
-                      // Phone
-                      TextFormField(
-                        controller: _phoneCtrl,
-                        keyboardType: TextInputType.phone,
-                        decoration: _inputDec(
-                            _caregiverMode
-                                ? 'Phone number patients will use to link you'
-                                : 'Phone number',
-                            Icons.phone_outlined),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Please enter your phone';
-                          }
-                          if (v.trim().length < 7) {
-                            return 'Phone number too short';
-                          }
-                          return null;
-                        },
                       ),
-                      const SizedBox(height: AppSpacing.md),
-
-                      // Password
-                      TextFormField(
-                        controller: _passCtrl,
-                        obscureText: _obscure,
-                        decoration:
-                            _inputDec('Password', Icons.lock_outline_rounded)
-                                .copyWith(
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscure
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) {
-                            return 'Please enter a password';
-                          }
-                          if (v.length < 6) {
-                            return 'Password must be at least 6 characters';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-
                       if (!_caregiverMode && !_doctorMode) ...[
-                        // Date of birth (optional)
-                        GestureDetector(
-                          onTap: _pickDob,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 14),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: Colors.black.withValues(alpha: 0.2)),
-                              borderRadius: AppRadius.md,
-                            ),
-                            child: Row(children: [
-                              const Icon(Icons.cake_outlined,
-                                  color: AppColors.grayMid, size: 20),
-                              const SizedBox(width: 12),
-                              Text(
-                                _dob != null
-                                    ? '${_dob!.day}/${_dob!.month}/${_dob!.year}'
-                                    : 'Date of birth (optional)',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: _dob != null
-                                      ? AppColors.grayDark
-                                      : AppColors.grayMid,
-                                ),
-                              ),
-                            ]),
-                          ),
+                        OutlinedButton.icon(
+                          onPressed: _pickDob,
+                          icon: const Icon(Icons.cake_outlined),
+                          label: Text(_dob == null
+                              ? 'تاريخ الميلاد (اختياري)'
+                              : '${_dob!.day}/${_dob!.month}/${_dob!.year}'),
                         ),
                         const SizedBox(height: AppSpacing.md),
-
-                        // Chronic condition (optional)
-                        TextFormField(
+                        _field(
                           controller: _condCtrl,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: _inputDec('Chronic condition (optional)',
-                              Icons.medical_information_outlined),
+                          label: 'الحالة المزمنة (اختياري)',
+                          icon: Icons.medical_information_outlined,
                         ),
                       ],
-                      const SizedBox(height: AppSpacing.xl),
-
-                      // Submit
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: auth.isLoading ? null : _submit,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.teal,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: const RoundedRectangleBorder(
-                                borderRadius: AppRadius.md),
-                          ),
-                          child: auth.isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: AppColors.white))
-                              : Text(
-                                  _caregiverMode
-                                      ? 'Create caregiver account'
-                                      : _doctorMode
-                                          ? 'Create doctor account'
-                                          : 'Create account',
-                                  style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600)),
-                        ),
+                      const SizedBox(height: AppSpacing.md),
+                      FilledButton(
+                        onPressed: auth.isLoading ? null : _submit,
+                        child: auth.isLoading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.white,
+                                ),
+                              )
+                            : Text(_doctorMode
+                                ? 'إنشاء حساب طبيب'
+                                : _caregiverMode
+                                    ? 'إنشاء حساب مرافق'
+                                    : 'إنشاء حساب'),
                       ),
-                    ])),
-
-                const SizedBox(height: AppSpacing.lg),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Text('Already have an account? ',
-                      style: AppTextStyles.screenSub),
-                  GestureDetector(
-                    onTap: widget.onLoginTap,
-                    child: const Text('Log in',
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: AppColors.teal,
-                            fontWeight: FontWeight.w600)),
+                    ],
                   ),
-                ]),
-              ]),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                TextButton(
+                  onPressed: widget.onLoginTap,
+                  child: const Text('لديك حساب؟ تسجيل الدخول'),
+                ),
+              ],
             ),
           ),
         ),
@@ -352,14 +264,50 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  InputDecoration _inputDec(String label, IconData icon) => InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 20),
-        border: const OutlineInputBorder(borderRadius: AppRadius.md),
-        enabledBorder: OutlineInputBorder(
-            borderRadius: AppRadius.md,
-            borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      );
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? Function(String?)? validator,
+    TextInputType? keyboardType,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        validator: validator,
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+      ),
+    );
+  }
+}
+
+class _SignupHeader extends StatelessWidget {
+  const _SignupHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 76,
+          height: 76,
+          decoration: const BoxDecoration(
+            color: AppColors.teal,
+            borderRadius: AppRadius.lg,
+          ),
+          child: const Icon(
+            Icons.medication_rounded,
+            color: AppColors.white,
+            size: 42,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('MED360', style: AppTextStyles.screenTitle.copyWith(fontSize: 30)),
+        const SizedBox(height: 4),
+        const Text('إنشاء حساب جديد', style: AppTextStyles.screenSub),
+      ],
+    );
+  }
 }
