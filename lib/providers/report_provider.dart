@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_domains.dart';
 import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 import 'adherence_provider.dart' show LoadStatus;
@@ -101,15 +102,20 @@ class ReportProvider extends ChangeNotifier {
   }) async {
     final report = _reportPayload(reportType);
     if (report == null) return false;
-    await FirebaseBackendService().shareReport(
-      patientId: patientId,
-      patientName: patientName,
-      recipientRole: recipientRole,
-      recipientId: recipientId,
-      reportType: reportType,
-      report: report,
-    );
-    return true;
+    try {
+      await FirebaseBackendService().reports.share(
+            patientId: patientId,
+            patientName: patientName,
+            recipientRole: recipientRole,
+            recipientId: recipientId,
+            reportType: reportType,
+            report: report,
+          );
+      return true;
+    } catch (e) {
+      debugPrint('Report sharing failed: $e');
+      return false;
+    }
   }
 
   Uint8List? exportCurrentMonthPdfBytes({

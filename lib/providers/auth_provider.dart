@@ -20,6 +20,7 @@ class AuthProvider extends ChangeNotifier {
   List<DoctorUser> _linkedDoctors = [];
   AccountRole? _role;
   String? _errorMessage;
+  bool _arabicMode = true;
 
   AuthStatus get status => _status;
   PatientUser? get patient => _patient;
@@ -33,7 +34,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isCaregiver => _role == AccountRole.caregiver;
   bool get isDoctor => _role == AccountRole.doctor;
 
-  bool get arabicMode => _patient?.arabicMode ?? true;
+  bool get arabicMode => _patient?.arabicMode ?? _arabicMode;
   bool get largeFonts => _patient?.largeFonts ?? false;
   bool get highContrast => _patient?.highContrast ?? false;
   bool get caregiverAlertsEnabled => _patient?.caregiverAlertsEnabled ?? true;
@@ -44,6 +45,8 @@ class AuthProvider extends ChangeNotifier {
     _status = AuthStatus.loading;
     notifyListeners();
     try {
+      final prefs = await SharedPreferences.getInstance();
+      _arabicMode = prefs.getBool('arabicMode') ?? true;
       final backend = FirebaseBackendService();
       final doctor = await backend.currentDoctor();
       if (doctor != null) {
@@ -67,6 +70,7 @@ class AuthProvider extends ChangeNotifier {
       if (firebasePatient != null) {
         final localPatient = await _db.getPatientById(firebasePatient.id);
         final patient = localPatient ?? firebasePatient;
+        _arabicMode = patient.arabicMode;
         if (localPatient == null) {
           await _db.insertPatient(patient);
         }
@@ -75,19 +79,19 @@ class AuthProvider extends ChangeNotifier {
         _caregiver = null;
         _doctor = null;
         _role = AccountRole.patient;
-        final prefs = await SharedPreferences.getInstance();
         await prefs.setString('loggedInPatientId', patient.id);
+        await prefs.setBool('arabicMode', patient.arabicMode);
         _status = AuthStatus.authenticated;
         notifyListeners();
         return;
       }
 
-      final prefs = await SharedPreferences.getInstance();
       final savedId = prefs.getString('loggedInPatientId');
       if (savedId != null) {
         final p = await _db.getPatientById(savedId);
         if (p != null) {
           _patient = p;
+          _arabicMode = p.arabicMode;
           _role = AccountRole.patient;
           _status = AuthStatus.authenticated;
           notifyListeners();
@@ -147,6 +151,7 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       await _db.insertPatient(newPatient);
+      _arabicMode = newPatient.arabicMode;
       try {
         await FirebaseBackendService().registerPatientDevice(newPatient);
       } catch (e) {
@@ -159,6 +164,7 @@ class AuthProvider extends ChangeNotifier {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', newPatient.id);
+      await prefs.setBool('arabicMode', newPatient.arabicMode);
 
       _status = AuthStatus.authenticated;
       notifyListeners();
@@ -212,6 +218,7 @@ class AuthProvider extends ChangeNotifier {
       final cloudPatient =
           await backend.currentPatient(passwordHash: _hashPassword(password));
       p = cloudPatient ?? p;
+      _arabicMode = p.arabicMode;
       await _db.insertPatient(p);
       try {
         await backend.registerPatientDevice(p);
@@ -225,6 +232,7 @@ class AuthProvider extends ChangeNotifier {
       _role = AccountRole.patient;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('loggedInPatientId', p.id);
+      await prefs.setBool('arabicMode', p.arabicMode);
 
       _status = AuthStatus.authenticated;
       notifyListeners();
@@ -401,18 +409,30 @@ class AuthProvider extends ChangeNotifier {
   // ── Settings ──────────────────────────────────────────────────────────────
   Future<void> _saveAndNotify(PatientUser updated) async {
     _patient = updated;
+    _arabicMode = updated.arabicMode;
     await _db.updatePatient(updated);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('arabicMode', updated.arabicMode);
     try {
       await FirebaseBackendService().updateCurrentPatientProfile(updated);
     } catch (e) {
       debugPrint('Patient profile cloud sync failed: $e');
-      rethrow;
     }
     notifyListeners();
   }
 
-  Future<void> toggleArabicMode() =>
-      _saveAndNotify(_patient!.copyWith(arabicMode: !arabicMode));
+  Future<void> toggleArabicMode() async {
+    final next = !arabicMode;
+    if (_patient == null) {
+      _arabicMode = next;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('arabicMode', next);
+      notifyListeners();
+      return;
+    }
+    await _saveAndNotify(_patient!.copyWith(arabicMode: next));
+  }
+
   Future<void> toggleLargeFonts() =>
       _saveAndNotify(_patient!.copyWith(largeFonts: !largeFonts));
   Future<void> toggleHighContrast() =>

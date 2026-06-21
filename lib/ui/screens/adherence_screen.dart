@@ -5,7 +5,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../models/models.dart';
 import '../../providers/providers.dart';
+import '../../services/firebase_backend_domains.dart';
 import '../../services/firebase_backend_service.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -78,7 +80,7 @@ class AdherenceScreen extends StatelessWidget {
       subject: 'Med360 report',
       text: 'Med360 report for ${patient.name}',
     );
-    await FirebaseBackendService().logUserEngagementEvent(
+    await FirebaseBackendService().analytics.logUserEngagementEvent(
       patientId: patient.id,
       eventType: 'reportPdfExported',
       source: 'patient',
@@ -121,14 +123,32 @@ class AdherenceScreen extends StatelessWidget {
     if (picked == null || picked.files.single.bytes == null) return;
 
     final file = picked.files.single;
-    await FirebaseBackendService().uploadPatientReport(
-      patientId: patient.id,
-      patientName: patient.name,
-      recipientRole: recipient.role,
-      recipientId: recipient.id,
-      fileName: file.name,
-      bytes: file.bytes!,
-    );
+    try {
+      await FirebaseBackendService().reports.upload(
+            patientId: patient.id,
+            patientName: patient.name,
+            recipientRole: recipient.role,
+            recipientId: recipient.id,
+            fileName: file.name,
+            bytes: file.bytes!,
+          );
+    } catch (e) {
+      debugPrint('Report upload failed: $e');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppStrings(auth.arabicMode).pick(
+              'تعذر رفع التقرير الآن. تحقق من الاتصال وحاول مرة أخرى.',
+              'Could not upload the report now. Check your connection and try again.',
+            ),
+          ),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_domains.dart';
 import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 import '../services/notification_service.dart';
@@ -41,7 +42,9 @@ class MedicationProvider extends ChangeNotifier {
       final patientUid = FirebaseBackendService().currentUid;
       final cloud = patientUid == null
           ? const <Medication>[]
-          : await FirebaseBackendService().fetchPatientMedications(patientUid);
+          : await FirebaseBackendService()
+              .medications
+              .fetchPatientMedications(patientUid);
       for (final med in cloud) {
         await _db.insertMedication(patientId, med);
       }
@@ -52,7 +55,7 @@ class MedicationProvider extends ChangeNotifier {
       _medications = byId.values.toList();
       _status = LoadStatus.loaded;
     } catch (e) {
-      _errorMessage = 'Could not load medications.';
+      _errorMessage = 'تعذر تحميل الأدوية / Could not load medications.';
       _status = LoadStatus.error;
     }
     notifyListeners();
@@ -101,10 +104,10 @@ class MedicationProvider extends ChangeNotifier {
         med.quantityRemaining > previous.quantityRemaining &&
         !med.needsRefill) {
       await _db.logRefillCompleted(patientId: patientId, medication: med);
-      await FirebaseBackendService().logRefillCompletion(
-        patientId: patientId,
-        medication: med,
-      );
+      await FirebaseBackendService().medications.logRefillCompletion(
+            patientId: patientId,
+            medication: med,
+          );
     }
     _medications = _medications.map((m) => m.id == med.id ? med : m).toList();
     notifyListeners();
@@ -158,7 +161,7 @@ class MedicationProvider extends ChangeNotifier {
         medication: medication,
         isArabic: isArabic,
       );
-      await FirebaseBackendService().logReminderEvent(
+      await FirebaseBackendService().analytics.logReminderEvent(
         patientId: patientId,
         medicationId: medication.id,
         eventType: 'refillReminder',
@@ -169,11 +172,11 @@ class MedicationProvider extends ChangeNotifier {
           'quantityRemaining': medication.quantityRemaining,
         },
       );
-      await FirebaseBackendService().sendRefillAlert(
-        patientId: patientId,
-        medication: medication,
-        milestone: milestone,
-      );
+      await FirebaseBackendService().notifications.sendRefillAlert(
+            patientId: patientId,
+            medication: medication,
+            milestone: milestone,
+          );
     } catch (e) {
       debugPrint('Refill side effects skipped: $e');
     }
@@ -192,24 +195,23 @@ class MedicationProvider extends ChangeNotifier {
     required String action,
   }) async {
     try {
-      await FirebaseBackendService().logMedicationModification(
-        patientId: patientId,
-        medication: medication,
-        action: action,
-        actorRole: 'patient',
-      );
+      await FirebaseBackendService().medications.logMedicationModification(
+            patientId: patientId,
+            medication: medication,
+            action: action,
+            actorRole: 'patient',
+          );
       final patientUid = FirebaseBackendService().currentUid;
       if (patientUid != null) {
-        await FirebaseBackendService().upsertPatientMedication(
-          patientUid: patientUid,
-          patientId: patientId,
-          medication: medication,
-          actorRole: 'patient',
-        );
+        await FirebaseBackendService().medications.upsertPatientMedication(
+              patientUid: patientUid,
+              patientId: patientId,
+              medication: medication,
+              actorRole: 'patient',
+            );
       }
     } catch (e) {
       debugPrint('Medication cloud sync skipped: $e');
-      rethrow;
     }
   }
 }

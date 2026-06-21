@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firebase_backend_domains.dart';
 import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 import 'adherence_provider.dart' show LoadStatus;
@@ -41,11 +42,10 @@ class CaregiverProvider extends ChangeNotifier {
 
   Future<void> loadSharedReports(String caregiverUid) async {
     try {
-      _sharedReports =
-          await FirebaseBackendService().fetchSharedReportsForRecipient(
-        recipientId: caregiverUid,
-        recipientRole: 'caregiver',
-      );
+      _sharedReports = await FirebaseBackendService().reports.fetchForRecipient(
+            recipientId: caregiverUid,
+            recipientRole: 'caregiver',
+          );
       notifyListeners();
     } catch (e) {
       debugPrint('Caregiver shared report load skipped: $e');
@@ -53,12 +53,12 @@ class CaregiverProvider extends ChangeNotifier {
   }
 
   Future<void> markReportReviewed(String reportId) async {
-    await FirebaseBackendService().markReportReviewed(reportId);
+    await FirebaseBackendService().reports.markReviewed(reportId);
     if (_caregiverUid != null) await loadSharedReports(_caregiverUid!);
   }
 
   Future<void> archiveReport(String reportId) async {
-    await FirebaseBackendService().archiveReport(reportId);
+    await FirebaseBackendService().reports.archive(reportId);
     if (_caregiverUid != null) await loadSharedReports(_caregiverUid!);
   }
 
@@ -69,14 +69,15 @@ class CaregiverProvider extends ChangeNotifier {
     required String phone,
     String? chronicCondition,
   }) async {
-    final created =
-        await FirebaseBackendService().createManagedPatientForCaregiver(
-      name: name,
-      email: email,
-      password: password,
-      phone: phone,
-      chronicCondition: chronicCondition,
-    );
+    final created = await FirebaseBackendService()
+        .careTeam
+        .createManagedPatientForCaregiver(
+          name: name,
+          email: email,
+          password: password,
+          phone: phone,
+          chronicCondition: chronicCondition,
+        );
     if (created == null) return false;
     _linkedPatients = [created, ..._linkedPatients];
     notifyListeners();
@@ -85,6 +86,7 @@ class CaregiverProvider extends ChangeNotifier {
 
   Future<bool> linkExistingPatientByPhone(String phone) async {
     final ok = await FirebaseBackendService()
+        .careTeam
         .linkExistingPatientToCurrentCaregiverByPhone(phone);
     if (_caregiverUid != null) listenToLinkedPatients(_caregiverUid!);
     return ok;
@@ -258,14 +260,14 @@ class CaregiverProvider extends ChangeNotifier {
           channel: NotificationChannel.both,
         );
         await _db.insertCaregiverNotification(patientId, notif);
-        await FirebaseBackendService().sendMissedDoseAlert(
-          patientId: patientId,
-          patientName: patientName,
-          caregiverId: id,
-          notification: notif,
-          isArabic: isArabic,
-        );
-        await FirebaseBackendService().logAdherenceEvent(
+        await FirebaseBackendService().notifications.sendMissedDoseAlert(
+              patientId: patientId,
+              patientName: patientName,
+              caregiverId: id,
+              notification: notif,
+              isArabic: isArabic,
+            );
+        await FirebaseBackendService().analytics.logAdherenceEvent(
           patientId: patientId,
           medicationId: medicationId,
           eventType: 'caregiverNotificationSent',
@@ -297,7 +299,7 @@ class CaregiverProvider extends ChangeNotifier {
         _notifications.where((notification) => notification.id == notifId);
     final notification = matches.isEmpty ? null : matches.first;
     if (notification != null) {
-      await FirebaseBackendService().logAdherenceEvent(
+      await FirebaseBackendService().analytics.logAdherenceEvent(
         patientId: notification.patientId,
         patientUid: notification.patientUid,
         medicationId: notification.medicationId,
@@ -337,7 +339,7 @@ class CaregiverProvider extends ChangeNotifier {
         );
         await _db.markNotificationRead(id);
         if (notification != null) {
-          await FirebaseBackendService().logAdherenceEvent(
+          await FirebaseBackendService().analytics.logAdherenceEvent(
             patientId: notification.patientId,
             patientUid: notification.patientUid,
             medicationId: notification.medicationId,
@@ -365,11 +367,11 @@ class CaregiverProvider extends ChangeNotifier {
     required String caregiverId,
     required bool isArabic,
   }) async {
-    await FirebaseBackendService().sendCaregiverAddedAlert(
-      patientId: patientId,
-      patientName: patientName,
-      caregiverId: caregiverId,
-      isArabic: isArabic,
-    );
+    await FirebaseBackendService().careTeam.sendCaregiverAddedAlert(
+          patientId: patientId,
+          patientName: patientName,
+          caregiverId: caregiverId,
+          isArabic: isArabic,
+        );
   }
 }

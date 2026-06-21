@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/models.dart';
 import '../../providers/providers.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -11,6 +12,7 @@ class DashboardScreen extends StatelessWidget {
 
   Future<void> _takeDose(BuildContext context, DoseConfirmation dose) async {
     final auth = context.read<AuthProvider>();
+    final strings = AppStrings(auth.arabicMode);
     final meds = context.read<MedicationProvider>();
     await context
         .read<AdherenceProvider>()
@@ -23,14 +25,14 @@ class DashboardScreen extends StatelessWidget {
         medication.copyWith(
           quantityRemaining: medication.quantityRemaining - 1,
         ),
-        isArabic: true,
+        isArabic: auth.arabicMode,
       );
     }
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('تم تسجيل ${dose.medicationName} كمأخوذ'),
+        content: Text(strings.doseLoggedTaken(dose.medicationName)),
         backgroundColor: AppColors.green,
         behavior: SnackBarBehavior.floating,
       ),
@@ -39,6 +41,7 @@ class DashboardScreen extends StatelessWidget {
 
   Future<void> _missDose(BuildContext context, DoseConfirmation dose) async {
     final auth = context.read<AuthProvider>();
+    final strings = AppStrings(auth.arabicMode);
     final adherence = context.read<AdherenceProvider>();
     final caregiverProvider = context.read<CaregiverProvider>();
     final caregiverIds = await adherence.confirmDoseMissed(
@@ -57,15 +60,15 @@ class DashboardScreen extends StatelessWidget {
         medicationId: dose.medicationId,
         medicationName: dose.medicationName,
         missedAt: DateTime.now(),
-        patientName: auth.patient?.name ?? 'مريض',
-        isArabic: true,
+        patientName: auth.patient?.name ?? strings.patient,
+        isArabic: auth.arabicMode,
       );
     }
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('تم تسجيل الجرعة كفائتة'),
+      SnackBar(
+        content: Text(strings.doseLoggedMissed),
         backgroundColor: AppColors.amber,
         behavior: SnackBarBehavior.floating,
       ),
@@ -85,6 +88,7 @@ class DashboardScreen extends StatelessWidget {
     final progress = total == 0 ? 0.0 : taken / total;
     final currentStreak = adherence.currentStreak;
     final longestStreak = adherence.longestStreak;
+    final strings = AppStrings.of(context);
 
     return Scaffold(
       backgroundColor: AppColors.pageTint,
@@ -104,7 +108,7 @@ class DashboardScreen extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xl),
             Text(
-              pending.isEmpty ? 'حالة اليوم' : 'الجرعات المتبقية',
+              pending.isEmpty ? strings.todaysStatus : strings.remainingDoses,
               style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -119,16 +123,16 @@ class DashboardScreen extends StatelessWidget {
                 ),
               )
             else if (medications.isEmpty)
-              const EmptyState(
+              EmptyState(
                 icon: Icons.medication_outlined,
-                title: 'لا توجد أدوية بعد',
-                subtitle: 'اذهب إلى أدويتي وأضف أول دواء',
+                title: strings.noMedicationsYet,
+                subtitle: strings.addFirstMedicationHint,
               )
             else if (today.isEmpty)
-              const EmptyState(
+              EmptyState(
                 icon: Icons.event_available_rounded,
-                title: 'لا توجد جرعات اليوم',
-                subtitle: 'عندما يكون لديك جرعات مجدولة ستظهر هنا',
+                title: strings.noDosesToday,
+                subtitle: strings.noDosesTodayHint,
               )
             else if (pending.isEmpty)
               const _DoneForTodayCard()
@@ -146,7 +150,7 @@ class DashboardScreen extends StatelessWidget {
             if (today.isNotEmpty && pending.length != today.length) ...[
               const SizedBox(height: AppSpacing.xl),
               Text(
-                'تم التعامل معها',
+                strings.handledDoses,
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -192,12 +196,12 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                name.trim().isEmpty ? 'مرحباً' : 'مرحباً، $name',
+                AppStrings.of(context).greeting(name),
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 25),
               ),
               const SizedBox(height: 4),
               Text(
-                'تابع جرعاتك بسهولة اليوم',
+                AppStrings.of(context).dashboardSubtitle,
                 style: AppTextStyles.screenSub.copyWith(fontSize: 15),
               ),
             ],
@@ -227,15 +231,14 @@ class _TodaySummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return AppCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            total == 0
-                ? 'لا توجد جرعات اليوم'
-                : 'تم أخذ $taken من $total جرعات',
+            strings.takenOfTotal(taken, total),
             style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -253,7 +256,7 @@ class _TodaySummary extends StatelessWidget {
             children: [
               Expanded(
                 child: _SummaryNumber(
-                  label: 'مأخوذة',
+                  label: strings.taken,
                   value: '$taken',
                   color: AppColors.green,
                 ),
@@ -261,7 +264,7 @@ class _TodaySummary extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: _SummaryNumber(
-                  label: 'فائتة',
+                  label: strings.missed,
                   value: '$missed',
                   color: AppColors.amber,
                 ),
@@ -269,7 +272,7 @@ class _TodaySummary extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: _SummaryNumber(
-                  label: 'النسبة',
+                  label: strings.rate,
                   value: '${(progress * 100).round()}%',
                   color: AppColors.teal,
                 ),
@@ -295,18 +298,18 @@ class _TodaySummary extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('سلسلة الالتزام',
+                      Text(strings.adherenceStreak,
                           style: AppTextStyles.medName),
                       const SizedBox(height: 3),
                       Text(
-                        'أفضل سلسلة: $longestStreak يوم',
+                        strings.bestStreak(longestStreak),
                         style: AppTextStyles.medDetail,
                       ),
                     ],
                   ),
                 ),
                 Text(
-                  '$currentStreak يوم',
+                  strings.days(currentStreak),
                   style: AppTextStyles.screenTitle.copyWith(
                     color: AppColors.sky,
                     fontSize: 24,
@@ -371,6 +374,7 @@ class _DoseActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return AppCard(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -390,7 +394,7 @@ class _DoseActionCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'وقت الجرعة: ${dose.scheduledTime}',
+                      strings.doseTimeValue(dose.scheduledTime),
                       style: AppTextStyles.medDetail.copyWith(fontSize: 15),
                     ),
                   ],
@@ -405,7 +409,7 @@ class _DoseActionCard extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onTake,
                   icon: const Icon(Icons.check_rounded, size: 24),
-                  label: const Text('أخذتها'),
+                  label: Text(strings.tookIt),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.teal,
                     foregroundColor: AppColors.white,
@@ -425,7 +429,7 @@ class _DoseActionCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onMiss,
                   icon: const Icon(Icons.close_rounded, size: 24),
-                  label: const Text('فائتة'),
+                  label: Text(strings.missed),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.red,
                     side: const BorderSide(color: AppColors.red, width: 1.4),
@@ -456,7 +460,8 @@ class _CompletedDoseTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = dose.isTaken ? AppColors.green : AppColors.red;
-    final label = dose.isTaken ? 'مأخوذة' : 'فائتة';
+    final strings = AppStrings.of(context);
+    final label = dose.isTaken ? strings.taken : strings.missed;
     final icon = dose.isTaken ? Icons.check_circle_rounded : Icons.cancel;
     return AppCard(
       padding: const EdgeInsets.all(14),
@@ -486,15 +491,19 @@ class _DoneForTodayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const AppCard(
+    return AppCard(
       child: Row(
         children: [
-          Icon(Icons.check_circle_rounded, color: AppColors.green, size: 42),
-          SizedBox(width: AppSpacing.md),
+          const Icon(
+            Icons.check_circle_rounded,
+            color: AppColors.green,
+            size: 42,
+          ),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Text(
-              'انتهيت من جرعات اليوم',
-              style: TextStyle(
+              AppStrings.of(context).doneForToday,
+              style: const TextStyle(
                 color: AppColors.navy,
                 fontSize: 21,
                 fontWeight: FontWeight.w800,

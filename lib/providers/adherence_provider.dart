@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../services/escalation_service.dart';
+import '../services/firebase_backend_domains.dart';
 import '../services/firebase_backend_service.dart';
 import '../services/local_db_service.dart';
 import '../services/notification_service.dart';
@@ -135,7 +136,7 @@ class AdherenceProvider extends ChangeNotifier {
       await _schedulePendingEscalations(isArabic: isArabic);
       _status = LoadStatus.loaded;
     } catch (e) {
-      _errorMessage = 'Could not load dose history.';
+      _errorMessage = 'تعذر تحميل سجل الجرعات / Could not load dose history.';
       _status = LoadStatus.error;
     }
     notifyListeners();
@@ -157,9 +158,12 @@ class AdherenceProvider extends ChangeNotifier {
     await _db.updateDose(patientId, updated);
     await NotificationService().cancelDoseEscalation(updated);
     await EscalationService().cancelDoseAutoMiss(updated);
-    await FirebaseBackendService().updateDoseStatus(
-      patientId: patientId,
-      dose: updated,
+    await _tryCloud(
+      'taken dose status sync',
+      () => FirebaseBackendService().updateDoseStatus(
+        patientId: patientId,
+        dose: updated,
+      ),
     );
     await _db.logAdherenceEvent(
       patientId: patientId,
@@ -170,25 +174,31 @@ class AdherenceProvider extends ChangeNotifier {
     );
     final delay = confirmedAt.difference(_scheduledDateTime(updated));
     if (delay.inMinutes > 0) {
-      await FirebaseBackendService().logAdherenceEvent(
-        patientId: patientId,
-        medicationId: updated.medicationId,
-        eventType: 'delayedDose',
-        source: source,
-        details: {
-          'doseId': updated.id,
-          'scheduledTime': updated.scheduledTime,
-          'delayMinutes': delay.inMinutes,
-        },
+      await _tryCloud(
+        'delayed dose analytics',
+        () => FirebaseBackendService().analytics.logAdherenceEvent(
+          patientId: patientId,
+          medicationId: updated.medicationId,
+          eventType: 'delayedDose',
+          source: source,
+          details: {
+            'doseId': updated.id,
+            'scheduledTime': updated.scheduledTime,
+            'delayMinutes': delay.inMinutes,
+          },
+        ),
       );
     }
     if (allTakenOnDate(DateTime.now())) {
       _showDailyCelebration = true;
-      await FirebaseBackendService().logAdherenceEvent(
-        patientId: patientId,
-        eventType: 'dailyCompletion',
-        source: 'app',
-        details: {'date': DateTime.now().toIso8601String()},
+      await _tryCloud(
+        'daily completion analytics',
+        () => FirebaseBackendService().analytics.logAdherenceEvent(
+          patientId: patientId,
+          eventType: 'dailyCompletion',
+          source: 'app',
+          details: {'date': DateTime.now().toIso8601String()},
+        ),
       );
       notifyListeners();
     }
@@ -216,9 +226,12 @@ class AdherenceProvider extends ChangeNotifier {
     await _db.updateDose(patientId, updated);
     await NotificationService().cancelDoseEscalation(updated);
     await EscalationService().cancelDoseAutoMiss(updated);
-    await FirebaseBackendService().updateDoseStatus(
-      patientId: patientId,
-      dose: updated,
+    await _tryCloud(
+      'missed dose status sync',
+      () => FirebaseBackendService().updateDoseStatus(
+        patientId: patientId,
+        dose: updated,
+      ),
     );
     await _db.logAdherenceEvent(
       patientId: patientId,
@@ -227,16 +240,19 @@ class AdherenceProvider extends ChangeNotifier {
       source: 'patient',
       details: updated.id,
     );
-    await FirebaseBackendService().logAdherenceEvent(
-      patientId: patientId,
-      medicationId: updated.medicationId,
-      eventType: 'manualMissedDose',
-      source: 'patient',
-      details: {
-        'doseId': updated.id,
-        'scheduledTime': updated.scheduledTime,
-        'caregiverNotified': updated.caregiverNotified,
-      },
+    await _tryCloud(
+      'manual missed dose analytics',
+      () => FirebaseBackendService().analytics.logAdherenceEvent(
+        patientId: patientId,
+        medicationId: updated.medicationId,
+        eventType: 'manualMissedDose',
+        source: 'patient',
+        details: {
+          'doseId': updated.id,
+          'scheduledTime': updated.scheduledTime,
+          'caregiverNotified': updated.caregiverNotified,
+        },
+      ),
     );
 
     if (!caregiverAlertsEnabled) return [];
@@ -269,21 +285,27 @@ class AdherenceProvider extends ChangeNotifier {
       await _db.updateDose(patientId, dose);
       await NotificationService().cancelDoseEscalation(dose);
       await EscalationService().cancelDoseAutoMiss(dose);
-      await FirebaseBackendService().updateDoseStatus(
-        patientId: patientId,
-        dose: dose,
+      await _tryCloud(
+        'auto missed dose status sync',
+        () => FirebaseBackendService().updateDoseStatus(
+          patientId: patientId,
+          dose: dose,
+        ),
       );
-      await FirebaseBackendService().logAdherenceEvent(
-        patientId: patientId,
-        medicationId: dose.medicationId,
-        eventType: 'autoMissedDose',
-        source: 'appScheduler',
-        details: {
-          'doseId': dose.id,
-          'scheduledTime': dose.scheduledTime,
-          'autoMissDelayMinutes': EscalationService.autoMissDelay.inMinutes,
-          'caregiverNotified': dose.caregiverNotified,
-        },
+      await _tryCloud(
+        'auto missed dose analytics',
+        () => FirebaseBackendService().analytics.logAdherenceEvent(
+          patientId: patientId,
+          medicationId: dose.medicationId,
+          eventType: 'autoMissedDose',
+          source: 'appScheduler',
+          details: {
+            'doseId': dose.id,
+            'scheduledTime': dose.scheduledTime,
+            'autoMissDelayMinutes': EscalationService.autoMissDelay.inMinutes,
+            'caregiverNotified': dose.caregiverNotified,
+          },
+        ),
       );
     }
     if (missedDoses.isNotEmpty) notifyListeners();
@@ -310,13 +332,16 @@ class AdherenceProvider extends ChangeNotifier {
     required bool isArabic,
   }) async {
     for (final dose in _allDoses.where((dose) => dose.isPending)) {
-      await FirebaseBackendService().upsertDose(
-        patientId: patientId,
-        patientName: patientName,
-        dose: dose,
-        caregivers: caregivers,
-        caregiverAlertsEnabled: caregiverAlertsEnabled,
-        isArabic: isArabic,
+      await _tryCloud(
+        'pending dose mirror',
+        () => FirebaseBackendService().upsertDose(
+          patientId: patientId,
+          patientName: patientName,
+          dose: dose,
+          caregivers: caregivers,
+          caregiverAlertsEnabled: caregiverAlertsEnabled,
+          isArabic: isArabic,
+        ),
       );
     }
   }
@@ -342,6 +367,14 @@ class AdherenceProvider extends ChangeNotifier {
       hour,
       minute,
     );
+  }
+
+  Future<void> _tryCloud(String label, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      debugPrint('$label skipped: $e');
+    }
   }
 
   (int current, int longest) _streaks() {

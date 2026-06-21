@@ -25,6 +25,7 @@ import 'ui/screens/caregiver_screen.dart';
 import 'ui/screens/caregiver_dashboard_screen.dart';
 import 'ui/screens/doctor_dashboard_screen.dart';
 import 'ui/screens/settings_screen.dart';
+import 'ui/i18n/app_strings.dart';
 import 'ui/theme/app_theme.dart';
 
 void main() async {
@@ -464,6 +465,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isAr = context.watch<AuthProvider>().arabicMode;
+    final strings = AppStrings(isAr);
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
@@ -479,27 +481,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           NavigationDestination(
             icon: const Icon(Icons.home_outlined),
             selectedIcon: const Icon(Icons.home_rounded),
-            label: isAr ? 'الرئيسية' : 'Home',
+            label: strings.home,
           ),
           NavigationDestination(
             icon: const Icon(Icons.medication_outlined),
             selectedIcon: const Icon(Icons.medication_rounded),
-            label: isAr ? 'أدويتي' : 'Meds',
+            label: strings.medications,
           ),
           NavigationDestination(
             icon: const Icon(Icons.bar_chart_outlined),
             selectedIcon: const Icon(Icons.bar_chart_rounded),
-            label: isAr ? 'التقارير' : 'Reports',
+            label: strings.reports,
           ),
           NavigationDestination(
             icon: const Icon(Icons.people_outline),
             selectedIcon: const Icon(Icons.people_rounded),
-            label: isAr ? 'الرعاية' : 'Care',
+            label: strings.care,
           ),
           NavigationDestination(
             icon: const Icon(Icons.settings_outlined),
             selectedIcon: const Icon(Icons.settings_rounded),
-            label: isAr ? 'الإعدادات' : 'Settings',
+            label: strings.settings,
           ),
         ],
       ),

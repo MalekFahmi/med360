@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 
 import '../../models/models.dart';
 import '../../providers/providers.dart';
+import '../../services/firebase_backend_domains.dart';
 import '../../services/firebase_backend_service.dart';
 import '../../services/notification_service.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -22,7 +24,10 @@ class MedicationsScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => MedicationFormSheet(initialMedication: med),
+      builder: (_) => MedicationFormSheet(
+        initialMedication: med,
+        isArabic: auth.arabicMode,
+      ),
     );
     if (saved == null || auth.patient == null) return;
 
@@ -31,14 +36,14 @@ class MedicationsScreen extends StatelessWidget {
         await medProvider.addMedication(
           auth.patient!.id,
           saved,
-          isArabic: true,
+          isArabic: auth.arabicMode,
         );
       } else {
         await NotificationService().cancelMedicationReminders(med);
         await medProvider.updateMedication(
           auth.patient!.id,
           saved,
-          isArabic: true,
+          isArabic: auth.arabicMode,
         );
       }
     } catch (_) {
@@ -54,9 +59,9 @@ class MedicationsScreen extends StatelessWidget {
     try {
       await NotificationService().scheduleMedicationReminders(
         saved,
-        isArabic: true,
+        isArabic: auth.arabicMode,
       );
-      await FirebaseBackendService().logReminderEvent(
+      await FirebaseBackendService().analytics.logReminderEvent(
         patientId: auth.patient!.id,
         medicationId: saved.id,
         eventType: 'reminderScheduled',
@@ -77,7 +82,7 @@ class MedicationsScreen extends StatelessWidget {
       patientName: auth.patient!.name,
       caregivers: auth.caregivers,
       caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-      isArabic: true,
+      isArabic: auth.arabicMode,
     );
   }
 
@@ -85,20 +90,27 @@ class MedicationsScreen extends StatelessWidget {
     final auth = context.read<AuthProvider>();
     final medProvider = context.read<MedicationProvider>();
     final adherence = context.read<AdherenceProvider>();
+    final strings = AppStrings(auth.arabicMode);
+    final medName = auth.arabicMode ? med.displayNameAr : med.displayName;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('حذف الدواء؟'),
-        content: Text('سيتم حذف ${med.displayNameAr} من قائمتك.'),
+        title: Text(strings.pick('حذف الدواء؟', 'Delete medication?')),
+        content: Text(
+          strings.pick(
+            'سيتم حذف $medName من قائمتك.',
+            '$medName will be removed from your list.',
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('إلغاء'),
+            child: Text(strings.pick('إلغاء', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.red),
-            child: const Text('حذف'),
+            child: Text(strings.pick('حذف', 'Delete')),
           ),
         ],
       ),
@@ -113,7 +125,7 @@ class MedicationsScreen extends StatelessWidget {
       patientName: auth.patient!.name,
       caregivers: auth.caregivers,
       caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-      isArabic: true,
+      isArabic: auth.arabicMode,
     );
   }
 
@@ -121,6 +133,7 @@ class MedicationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final medProvider = context.watch<MedicationProvider>();
+    final strings = AppStrings.of(context);
 
     return Scaffold(
       backgroundColor: AppColors.pageTint,
@@ -129,7 +142,7 @@ class MedicationsScreen extends StatelessWidget {
         elevation: 0,
         centerTitle: false,
         title: Text(
-          'أدويتي',
+          strings.medications,
           style: AppTextStyles.screenTitle.copyWith(fontSize: 26),
         ),
       ),
@@ -138,12 +151,15 @@ class MedicationsScreen extends StatelessWidget {
           : medProvider.isEmpty
               ? EmptyState(
                   icon: Icons.medication_outlined,
-                  title: 'لا توجد أدوية بعد',
-                  subtitle: 'اضغط زر إضافة دواء لإدخال أول دواء',
+                  title: strings.noMedicationsYet,
+                  subtitle: strings.pick(
+                    'اضغط زر إضافة دواء لإدخال أول دواء',
+                    'Tap Add medication to enter the first one.',
+                  ),
                   action: FilledButton.icon(
                     onPressed: () => _openMedicationForm(context),
                     icon: const Icon(Icons.add_rounded),
-                    label: const Text('إضافة دواء'),
+                    label: Text(strings.addMedication),
                   ),
                 )
               : ListView.builder(
@@ -170,7 +186,7 @@ class MedicationsScreen extends StatelessWidget {
                               await NotificationService()
                                   .scheduleMedicationReminders(
                                 updated,
-                                isArabic: true,
+                                isArabic: auth.arabicMode,
                               );
                             }
                           } else {
@@ -191,7 +207,7 @@ class MedicationsScreen extends StatelessWidget {
         foregroundColor: AppColors.white,
         onPressed: () => _openMedicationForm(context),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('إضافة دواء'),
+        label: Text(strings.addMedication),
       ),
     );
   }
@@ -214,11 +230,26 @@ class _MedicationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final isArabic = strings.isArabic;
     final paused = medication.status == MedicationStatus.paused;
-    final notes = (medication.notesAr ?? medication.notes ?? '').trim();
-    final indication = medication.indicationAr.trim().isNotEmpty
-        ? medication.indicationAr.trim()
-        : medication.indication.trim();
+    final notes = isArabic
+        ? ((medication.notesAr ?? '').trim().isNotEmpty
+            ? medication.notesAr!.trim()
+            : (medication.notes ?? '').trim())
+        : ((medication.notes ?? '').trim().isNotEmpty
+            ? medication.notes!.trim()
+            : (medication.notesAr ?? '').trim());
+    final indication = isArabic
+        ? (medication.indicationAr.trim().isNotEmpty
+            ? medication.indicationAr.trim()
+            : medication.indication.trim())
+        : (medication.indication.trim().isNotEmpty
+            ? medication.indication.trim()
+            : medication.indicationAr.trim());
+    final displayName =
+        isArabic ? medication.displayNameAr : medication.displayName;
+    final formLabel = isArabic ? medication.formLabelAr : medication.formLabel;
     final daysLeft = medication.estimatedDaysRemaining;
     return AppCard(
       onTap: onTap,
@@ -236,12 +267,12 @@ class _MedicationCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      medication.displayNameAr,
+                      displayName,
                       style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '${medication.formLabelAr} • ${medication.dosage}',
+                      '$formLabel • ${medication.dosage}',
                       style: AppTextStyles.medDetail.copyWith(fontSize: 15),
                     ),
                   ],
@@ -254,12 +285,22 @@ class _MedicationCard extends StatelessWidget {
                   if (value == 'delete') onDelete();
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'edit', child: Text('تعديل')),
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Text(strings.pick('تعديل', 'Edit')),
+                  ),
                   PopupMenuItem(
                     value: 'pause',
-                    child: Text(paused ? 'استئناف' : 'إيقاف مؤقت'),
+                    child: Text(
+                      paused
+                          ? strings.pick('استئناف', 'Resume')
+                          : strings.pick('إيقاف مؤقت', 'Pause'),
+                    ),
                   ),
-                  const PopupMenuItem(value: 'delete', child: Text('حذف')),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(strings.pick('حذف', 'Delete')),
+                  ),
                 ],
               ),
             ],
@@ -267,26 +308,29 @@ class _MedicationCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           _InfoLine(
             icon: Icons.today_outlined,
-            text: 'الجرعات اليومية: ${_formatNumber(medication.dosesPerDay)}',
+            text: strings.dailyDoses(medication.dosesPerDay),
           ),
           const SizedBox(height: 8),
           _InfoLine(
             icon: Icons.schedule_rounded,
-            text:
-                'الأوقات: ${medication.reminderTimes.map((time) => time.display).join('، ')}',
+            text: strings.times(
+              medication.reminderTimes
+                  .map((time) => time.display)
+                  .join(strings.pick('، ', ', ')),
+            ),
           ),
           if (indication.isNotEmpty) ...[
             const SizedBox(height: 8),
             _InfoLine(
               icon: Icons.info_outline_rounded,
-              text: 'الاستخدام: $indication',
+              text: strings.indication(indication),
             ),
           ],
           if (notes.isNotEmpty) ...[
             const SizedBox(height: 8),
             _InfoLine(
               icon: Icons.notes_rounded,
-              text: 'ملاحظات: $notes',
+              text: strings.notes(notes),
             ),
           ],
           const SizedBox(height: AppSpacing.md),
@@ -295,26 +339,33 @@ class _MedicationCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               AppBadge(
-                label: paused ? 'متوقف مؤقتاً' : 'نشط',
+                label: paused
+                    ? strings.pick('متوقف مؤقتاً', 'Paused')
+                    : strings.active,
                 variant: paused ? BadgeVariant.amber : BadgeVariant.green,
               ),
               if (medication.quantityRemaining > 0)
                 AppBadge(
-                  label: 'المتبقي ${medication.quantityRemaining} جرعة',
+                  label: strings.remainingQuantity(
+                    medication.quantityRemaining,
+                  ),
                   variant: BadgeVariant.blue,
                   icon: Icons.inventory_2_outlined,
                 ),
               if (medication.quantityRemaining > 0)
                 AppBadge(
-                  label: 'يكفي ${daysLeft.ceil()} يوم',
+                  label: strings.pick(
+                    'يكفي ${daysLeft.ceil()} يوم',
+                    '${daysLeft.ceil()} days left',
+                  ),
                   variant: medication.needsRefill
                       ? BadgeVariant.amber
                       : BadgeVariant.teal,
                   icon: Icons.event_available_outlined,
                 ),
               if (medication.needsRefill)
-                const AppBadge(
-                  label: 'قربت التعبئة',
+                AppBadge(
+                  label: strings.pick('قربت التعبئة', 'Refill soon'),
                   variant: BadgeVariant.red,
                   icon: Icons.warning_amber_rounded,
                 ),
@@ -323,11 +374,6 @@ class _MedicationCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _formatNumber(double value) {
-    if (value == value.roundToDouble()) return value.toInt().toString();
-    return value.toStringAsFixed(1);
   }
 }
 
@@ -392,7 +438,11 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
     _nameCtrl = TextEditingController(text: med?.name ?? '');
     _nameArCtrl = TextEditingController(text: med?.nameAr ?? '');
     _dosageCtrl = TextEditingController(text: med?.dosage ?? '');
-    _conditionCtrl = TextEditingController(text: med?.indicationAr ?? '');
+    _conditionCtrl = TextEditingController(
+      text: widget.isArabic
+          ? (med?.indicationAr ?? med?.indication ?? '')
+          : (med?.indication ?? med?.indicationAr ?? ''),
+    );
     _quantityCtrl =
         TextEditingController(text: (med?.quantityRemaining ?? 0).toString());
     _dosesPerDayCtrl =
@@ -462,6 +512,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final strings = AppStrings(widget.isArabic);
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
       child: ConstrainedBox(
@@ -477,44 +528,52 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
               children: [
                 Text(
                   widget.initialMedication == null
-                      ? 'إضافة دواء'
-                      : 'تعديل الدواء',
+                      ? strings.addMedication
+                      : strings.pick('تعديل الدواء', 'Edit medication'),
                   style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _textField(
                   controller: _nameCtrl,
-                  label: 'اسم الدواء',
+                  label: strings.pick('اسم الدواء', 'Medication name'),
                   icon: Icons.medication_rounded,
                   validator: (value) => value == null || value.trim().isEmpty
-                      ? 'أدخل اسم الدواء'
+                      ? strings.pick(
+                          'أدخل اسم الدواء',
+                          'Enter the medication name',
+                        )
                       : null,
                 ),
                 _textField(
                   controller: _nameArCtrl,
-                  label: 'الاسم بالعربية (اختياري)',
+                  label: strings.pick(
+                    'الاسم بالعربية (اختياري)',
+                    'Arabic name (optional)',
+                  ),
                   icon: Icons.translate_rounded,
                 ),
                 _textField(
                   controller: _dosageCtrl,
-                  label: 'الجرعة، مثال 500mg',
+                  label: strings.pick('الجرعة، مثال 500mg', 'Dose, e.g. 500mg'),
                   icon: Icons.straighten_rounded,
                   validator: (value) => value == null || value.trim().isEmpty
-                      ? 'أدخل الجرعة'
+                      ? strings.pick('أدخل الجرعة', 'Enter the dose')
                       : null,
                 ),
                 DropdownButtonFormField<MedicationForm>(
                   value: _form,
-                  decoration: const InputDecoration(
-                    labelText: 'شكل الدواء',
-                    prefixIcon: Icon(Icons.category_outlined),
-                    border: OutlineInputBorder(borderRadius: AppRadius.md),
+                  decoration: InputDecoration(
+                    labelText: strings.pick('شكل الدواء', 'Medication form'),
+                    prefixIcon: const Icon(Icons.category_outlined),
+                    border: const OutlineInputBorder(
+                      borderRadius: AppRadius.md,
+                    ),
                   ),
                   items: MedicationForm.values
                       .map(
                         (form) => DropdownMenuItem(
                           value: form,
-                          child: Text(_formLabel(form)),
+                          child: Text(_formLabel(strings, form)),
                         ),
                       )
                       .toList(),
@@ -525,11 +584,12 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                 const SizedBox(height: AppSpacing.md),
                 _textField(
                   controller: _conditionCtrl,
-                  label: 'يستخدم لـ (اختياري)',
+                  label: strings.pick(
+                      'يستخدم لـ (اختياري)', 'Used for (optional)'),
                   icon: Icons.info_outline_rounded,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                const SectionLabel('أوقات التذكير'),
+                SectionLabel(strings.pick('أوقات التذكير', 'Reminder times')),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -545,7 +605,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                       ),
                     ActionChip(
                       avatar: const Icon(Icons.add_rounded, size: 16),
-                      label: const Text('إضافة وقت'),
+                      label: Text(strings.pick('إضافة وقت', 'Add time')),
                       onPressed: () => setState(
                         () => _times.add(
                           const ReminderTime(hour: 20, minute: 0),
@@ -556,14 +616,14 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 SegmentedButton<MedicationStatus>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                       value: MedicationStatus.active,
-                      label: Text('نشط'),
+                      label: Text(strings.active),
                     ),
                     ButtonSegment(
                       value: MedicationStatus.paused,
-                      label: Text('متوقف'),
+                      label: Text(strings.paused),
                     ),
                   ],
                   selected: {_status},
@@ -573,19 +633,21 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                 const SizedBox(height: AppSpacing.md),
                 DropdownButtonFormField<ReminderType>(
                   value: _reminderType,
-                  decoration: const InputDecoration(
-                    labelText: 'نوع التذكير',
-                    prefixIcon: Icon(Icons.notifications_active_outlined),
-                    border: OutlineInputBorder(borderRadius: AppRadius.md),
+                  decoration: InputDecoration(
+                    labelText: strings.pick('نوع التذكير', 'Reminder type'),
+                    prefixIcon: const Icon(Icons.notifications_active_outlined),
+                    border: const OutlineInputBorder(
+                      borderRadius: AppRadius.md,
+                    ),
                   ),
-                  items: const [
+                  items: [
                     DropdownMenuItem(
                       value: ReminderType.notification,
-                      child: Text('إشعار'),
+                      child: Text(strings.pick('إشعار', 'Notification')),
                     ),
                     DropdownMenuItem(
                       value: ReminderType.alarm,
-                      child: Text('منبه'),
+                      child: Text(strings.pick('منبه', 'Alarm')),
                     ),
                   ],
                   onChanged: (value) {
@@ -598,7 +660,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                     Expanded(
                       child: _textField(
                         controller: _quantityCtrl,
-                        label: 'الكمية',
+                        label: strings.pick('الكمية', 'Quantity'),
                         icon: Icons.inventory_2_outlined,
                         keyboardType: TextInputType.number,
                       ),
@@ -607,7 +669,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                     Expanded(
                       child: _textField(
                         controller: _dosesPerDayCtrl,
-                        label: 'جرعات/يوم',
+                        label: strings.pick('جرعات/يوم', 'Doses/day'),
                         icon: Icons.today_outlined,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -616,16 +678,18 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                     ),
                   ],
                 ),
-                const InfoBanner(
-                  message:
-                      'سيذكرك التطبيق تلقائيا عندما يبقى من الدواء 3 أيام ثم يوم واحد.',
+                InfoBanner(
+                  message: strings.pick(
+                    'سيذكرك التطبيق تلقائيا عندما يبقى من الدواء 3 أيام ثم يوم واحد.',
+                    'The app will remind you when 3 days and 1 day remain.',
+                  ),
                   color: AppColors.teal,
                   icon: Icons.notifications_active_outlined,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _textField(
                   controller: _notesCtrl,
-                  label: 'ملاحظات (اختياري)',
+                  label: strings.pick('ملاحظات (اختياري)', 'Notes (optional)'),
                   icon: Icons.notes_rounded,
                   minLines: 2,
                   maxLines: 3,
@@ -636,7 +700,7 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
                   child: FilledButton.icon(
                     onPressed: _save,
                     icon: const Icon(Icons.check_rounded),
-                    label: const Text('حفظ الدواء'),
+                    label: Text(strings.pick('حفظ الدواء', 'Save medication')),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(54),
                       textStyle: const TextStyle(
@@ -680,14 +744,14 @@ class _MedicationFormSheetState extends State<MedicationFormSheet> {
     );
   }
 
-  String _formLabel(MedicationForm form) => switch (form) {
-        MedicationForm.tablet => 'قرص',
-        MedicationForm.capsule => 'كبسولة',
-        MedicationForm.liquid => 'سائل',
-        MedicationForm.injection => 'حقنة',
-        MedicationForm.drops => 'قطرات',
-        MedicationForm.inhaler => 'بخاخ',
-        MedicationForm.patch => 'لصقة',
-        MedicationForm.other => 'أخرى',
+  String _formLabel(AppStrings strings, MedicationForm form) => switch (form) {
+        MedicationForm.tablet => strings.pick('قرص', 'Tablet'),
+        MedicationForm.capsule => strings.pick('كبسولة', 'Capsule'),
+        MedicationForm.liquid => strings.pick('سائل', 'Liquid'),
+        MedicationForm.injection => strings.pick('حقنة', 'Injection'),
+        MedicationForm.drops => strings.pick('قطرات', 'Drops'),
+        MedicationForm.inhaler => strings.pick('بخاخ', 'Inhaler'),
+        MedicationForm.patch => strings.pick('لصقة', 'Patch'),
+        MedicationForm.other => strings.pick('أخرى', 'Other'),
       };
 }

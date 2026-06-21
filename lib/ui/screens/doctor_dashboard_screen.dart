@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/providers.dart';
+import '../../services/firebase_backend_domains.dart';
 import '../../services/firebase_backend_service.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
+import '../widgets/shared_patient_card.dart';
+import '../widgets/shared_report_widgets.dart';
 import '../widgets/shared_widgets.dart';
-import 'shared_patient_medications_screen.dart';
 import 'shared_report_detail_screen.dart';
 
 class DoctorDashboardScreen extends StatefulWidget {
@@ -34,15 +37,15 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     }
 
     try {
-      final patients =
-          await FirebaseBackendService().fetchAssignedPatientsForDoctor(
-        doctor.uid,
-      );
-      final reports =
-          await FirebaseBackendService().fetchSharedReportsForRecipient(
-        recipientId: doctor.uid,
-        recipientRole: 'doctor',
-      );
+      final patients = await FirebaseBackendService()
+          .careTeam
+          .fetchAssignedPatientsForDoctor(
+            doctor.uid,
+          );
+      final reports = await FirebaseBackendService().reports.fetchForRecipient(
+            recipientId: doctor.uid,
+            recipientRole: 'doctor',
+          );
       if (!mounted) return;
       setState(() {
         _patients = patients;
@@ -64,10 +67,11 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     );
     if (phone == null || !mounted) return;
 
-    final linked =
-        await FirebaseBackendService().linkPatientToCurrentDoctorByPhone(
-      phone,
-    );
+    final linked = await FirebaseBackendService()
+        .careTeam
+        .linkPatientToCurrentDoctorByPhone(
+          phone,
+        );
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -86,41 +90,47 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
 
   Future<void> _reviewReport(String reportId) async {
     if (reportId.isEmpty) return;
-    await FirebaseBackendService().markReportReviewed(reportId);
+    await FirebaseBackendService().reports.markReviewed(reportId);
     await _load();
   }
 
   Future<void> _archiveReport(String reportId) async {
     if (reportId.isEmpty) return;
-    await FirebaseBackendService().archiveReport(reportId);
+    await FirebaseBackendService().reports.archive(reportId);
     await _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final doctor = context.watch<AuthProvider>().doctor;
+    final strings = AppStrings.of(context);
+    final isArabic = strings.isArabic;
     final visibleReports =
         _reports.where((report) => report['archived'] != true).toList();
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: DefaultTabController(
         length: 2,
         child: Scaffold(
           backgroundColor: AppColors.pageTint,
           appBar: AppBar(
-            title: const Text('لوحة الطبيب'),
+            title: Text(strings.pick('لوحة الطبيب', 'Doctor dashboard')),
             actions: [
               IconButton(
-                tooltip: 'تسجيل الخروج',
+                tooltip: strings.logout,
                 icon: const Icon(Icons.logout_rounded),
                 onPressed: () => context.read<AuthProvider>().logout(),
               ),
             ],
-            bottom: const TabBar(
+            bottom: TabBar(
               tabs: [
-                Tab(icon: Icon(Icons.people_alt_outlined), text: 'المرضى'),
-                Tab(icon: Icon(Icons.summarize_outlined), text: 'التقارير'),
+                Tab(
+                    icon: const Icon(Icons.people_alt_outlined),
+                    text: strings.patients),
+                Tab(
+                    icon: const Icon(Icons.summarize_outlined),
+                    text: strings.reports),
               ],
             ),
           ),
@@ -130,10 +140,10 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
               children: [
                 _PatientsTab(
                   loading: _loading,
-                  doctorName: doctor?.name ?? 'الطبيب',
+                  doctorName: doctor?.name ?? strings.doctor,
                   specialty: doctor?.specialty.isNotEmpty == true
                       ? doctor!.specialty
-                      : 'الرعاية الطبية',
+                      : strings.pick('الرعاية الطبية', 'Medical care'),
                   patients: _patients,
                   reportsCount: visibleReports.length,
                   onLink: _linkPatient,
@@ -171,6 +181,7 @@ class _PatientsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -205,7 +216,7 @@ class _PatientsTab extends StatelessWidget {
           children: [
             Expanded(
               child: MetricTile(
-                label: 'المرضى',
+                label: strings.patients,
                 value: '${patients.length}',
                 valueColor: AppColors.teal,
               ),
@@ -213,7 +224,7 @@ class _PatientsTab extends StatelessWidget {
             const SizedBox(width: AppSpacing.md),
             Expanded(
               child: MetricTile(
-                label: 'التقارير',
+                label: strings.reports,
                 value: '$reportsCount',
                 valueColor: AppColors.sky,
               ),
@@ -225,14 +236,14 @@ class _PatientsTab extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                'المرضى',
+                strings.patients,
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
               ),
             ),
             FilledButton.icon(
               onPressed: onLink,
               icon: const Icon(Icons.link_rounded),
-              label: const Text('ربط مريض'),
+              label: Text(strings.linkPatient),
             ),
           ],
         ),
@@ -243,16 +254,19 @@ class _PatientsTab extends StatelessWidget {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (patients.isEmpty)
-          const EmptyState(
+          EmptyState(
             icon: Icons.people_alt_outlined,
-            title: 'لا يوجد مرضى',
-            subtitle: 'اربط مريضا برقم الهاتف لعرض أدويته وتقاريره.',
+            title: strings.noPatients,
+            subtitle: strings.noPatientsDoctorHint,
           )
         else
           ...patients.map(
             (patient) => Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _PatientCard(patient: patient),
+              child: SharedPatientCard(
+                patient: patient,
+                actorRole: 'doctor',
+              ),
             ),
           ),
       ],
@@ -273,14 +287,15 @@ class _ReportsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     if (reports.isEmpty) {
       return ListView(
         padding: const EdgeInsets.all(20),
-        children: const [
+        children: [
           EmptyState(
             icon: Icons.summarize_outlined,
-            title: 'لا توجد تقارير',
-            subtitle: 'ستظهر هنا التقارير التي يشاركها المرضى معك.',
+            title: strings.noReports,
+            subtitle: strings.sharedReportsHint,
           ),
         ],
       );
@@ -292,7 +307,7 @@ class _ReportsTab extends StatelessWidget {
           .map(
             (report) => Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _ReportCard(
+              child: SharedReportCard(
                 report: report,
                 onOpen: () => Navigator.push(
                   context,
@@ -310,116 +325,6 @@ class _ReportsTab extends StatelessWidget {
             ),
           )
           .toList(),
-    );
-  }
-}
-
-class _PatientCard extends StatelessWidget {
-  final Map<String, dynamic> patient;
-
-  const _PatientCard({required this.patient});
-
-  @override
-  Widget build(BuildContext context) {
-    final name = '${patient['name'] ?? 'مريض'}';
-    final phone = '${patient['phone'] ?? 'بدون رقم هاتف'}';
-
-    return AppCard(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SharedPatientMedicationsScreen(
-            patient: patient,
-            actorRole: 'doctor',
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 28,
-            backgroundColor: AppColors.skyLight,
-            child: Icon(Icons.person_rounded, color: AppColors.sky, size: 30),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name, style: AppTextStyles.medName),
-                const SizedBox(height: 6),
-                Text(phone, style: AppTextStyles.medDetail),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_left_rounded, color: AppColors.grayMid),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReportCard extends StatelessWidget {
-  final Map<String, dynamic> report;
-  final VoidCallback onOpen;
-  final VoidCallback onReview;
-  final VoidCallback onArchive;
-
-  const _ReportCard({
-    required this.report,
-    required this.onOpen,
-    required this.onReview,
-    required this.onArchive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final data = (report['report'] as Map?) ?? const {};
-    final adherence = (((data['adherenceRate'] as num?) ?? 0) * 100).round();
-    final patientName = '${report['patientName'] ?? 'مريض'}';
-    final reviewed = report['reviewed'] == true || report['reviewedAt'] != null;
-    final type = '${report['reportType'] ?? data['reportType'] ?? 'monthly'}';
-
-    return AppCard(
-      onTap: onOpen,
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.tealLight,
-            child: Icon(Icons.summarize_outlined, color: AppColors.teal),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(patientName, style: AppTextStyles.medName),
-                const SizedBox(height: 4),
-                Text(
-                  type == 'uploaded'
-                      ? '${data['fileName'] ?? data['label'] ?? 'ملف مرفوع'}'
-                      : 'معدل الالتزام $adherence%',
-                  style: AppTextStyles.medDetail,
-                ),
-              ],
-            ),
-          ),
-          AppBadge(
-            label: reviewed ? 'تمت المراجعة' : 'جديد',
-            variant: reviewed ? BadgeVariant.teal : BadgeVariant.amber,
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'review') onReview();
-              if (value == 'archive') onArchive();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'review', child: Text('تمت المراجعة')),
-              PopupMenuItem(value: 'archive', child: Text('أرشفة')),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }
@@ -449,9 +354,11 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final strings = AppStrings.of(context);
+    final isArabic = strings.isArabic;
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
         child: Form(
@@ -461,12 +368,12 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'ربط مريض',
+                strings.linkPatient,
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'أدخل رقم هاتف المريض كما هو مسجل في حسابه.',
+              Text(
+                strings.linkPatientHint,
                 style: AppTextStyles.medDetail,
               ),
               const SizedBox(height: AppSpacing.lg),
@@ -474,12 +381,12 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'رقم هاتف المريض',
-                  prefixIcon: Icon(Icons.phone_outlined),
+                decoration: InputDecoration(
+                  labelText: strings.patientPhone,
+                  prefixIcon: const Icon(Icons.phone_outlined),
                 ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? 'أدخل رقم هاتف المريض'
+                    ? strings.enterPatientPhone
                     : null,
                 onFieldSubmitted: (_) => _submit(),
               ),
@@ -487,7 +394,7 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
               FilledButton.icon(
                 onPressed: _submit,
                 icon: const Icon(Icons.link_rounded),
-                label: const Text('ربط المريض'),
+                label: Text(strings.linkPatient),
               ),
             ],
           ),

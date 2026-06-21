@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/caregiver_provider.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
+import '../widgets/shared_patient_card.dart';
+import '../widgets/shared_report_widgets.dart';
 import '../widgets/shared_widgets.dart';
-import 'shared_patient_medications_screen.dart';
 import 'shared_report_detail_screen.dart';
 
 class CaregiverDashboardScreen extends StatefulWidget {
@@ -34,33 +36,39 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final provider = context.watch<CaregiverProvider>();
+    final strings = AppStrings.of(context);
+    final isArabic = strings.isArabic;
     final caregiver = auth.caregiver;
     final reports = provider.sharedReports
         .where((report) => report['archived'] != true)
         .toList();
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: DefaultTabController(
         length: 3,
         child: Scaffold(
           backgroundColor: AppColors.pageTint,
           appBar: AppBar(
-            title: const Text('لوحة المرافق'),
+            title: Text(strings.pick('لوحة المرافق', 'Caregiver dashboard')),
             actions: [
               IconButton(
-                tooltip: 'تسجيل الخروج',
+                tooltip: strings.logout,
                 onPressed: () => context.read<AuthProvider>().logout(),
                 icon: const Icon(Icons.logout_rounded),
               ),
             ],
-            bottom: const TabBar(
+            bottom: TabBar(
               tabs: [
-                Tab(icon: Icon(Icons.people_outline), text: 'المرضى'),
-                Tab(icon: Icon(Icons.summarize_outlined), text: 'التقارير'),
                 Tab(
-                    icon: Icon(Icons.notifications_outlined),
-                    text: 'التنبيهات'),
+                    icon: const Icon(Icons.people_outline),
+                    text: strings.patients),
+                Tab(
+                    icon: const Icon(Icons.summarize_outlined),
+                    text: strings.reports),
+                Tab(
+                    icon: const Icon(Icons.notifications_outlined),
+                    text: strings.notifications),
               ],
             ),
           ),
@@ -69,7 +77,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
             child: TabBarView(
               children: [
                 _PatientsTab(
-                  caregiverName: caregiver?.name ?? 'مرافق',
+                  caregiverName: caregiver?.name ?? strings.caregiver,
                   caregiverEmail: caregiver?.email ?? '',
                   patients: provider.linkedPatients,
                   unreadCount: provider.unreadCount,
@@ -110,6 +118,7 @@ class _PatientsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -147,7 +156,7 @@ class _PatientsTab extends StatelessWidget {
           children: [
             Expanded(
               child: MetricTile(
-                label: 'المرضى',
+                label: strings.patients,
                 value: '${patients.length}',
                 valueColor: AppColors.teal,
               ),
@@ -155,7 +164,7 @@ class _PatientsTab extends StatelessWidget {
             const SizedBox(width: AppSpacing.md),
             Expanded(
               child: MetricTile(
-                label: 'تنبيهات',
+                label: strings.notifications,
                 value: '$unreadCount',
                 valueColor: unreadCount > 0 ? AppColors.red : AppColors.green,
               ),
@@ -164,7 +173,7 @@ class _PatientsTab extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         MetricTile(
-          label: 'تقارير مشتركة',
+          label: strings.sharedReports,
           value: '$reportsCount',
           valueColor: AppColors.sky,
         ),
@@ -173,29 +182,32 @@ class _PatientsTab extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                'المرضى',
+                strings.patients,
                 style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
               ),
             ),
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add_rounded),
-              label: const Text('إضافة'),
+              label: Text(strings.add),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
         if (patients.isEmpty)
-          const EmptyState(
+          EmptyState(
             icon: Icons.people_outline_rounded,
-            title: 'لا يوجد مرضى',
-            subtitle: 'أضف مريضا أو اربطه برقم الهاتف',
+            title: strings.noPatients,
+            subtitle: strings.noPatientsCaregiverHint,
           )
         else
           ...patients.map(
             (patient) => Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _PatientCard(patient: patient),
+              child: SharedPatientCard(
+                patient: patient,
+                actorRole: 'caregiver',
+              ),
             ),
           ),
       ],
@@ -216,14 +228,15 @@ class _ReportsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     if (reports.isEmpty) {
       return ListView(
         padding: const EdgeInsets.all(20),
-        children: const [
+        children: [
           EmptyState(
             icon: Icons.summarize_outlined,
-            title: 'لا توجد تقارير مشتركة',
-            subtitle: 'ستظهر هنا التقارير التي يشاركها المرضى معك.',
+            title: strings.noSharedReports,
+            subtitle: strings.sharedReportsHint,
           ),
         ],
       );
@@ -235,7 +248,7 @@ class _ReportsTab extends StatelessWidget {
           .map(
             (report) => Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _ReportCard(
+              child: SharedReportCard(
                 report: report,
                 onOpen: () => Navigator.push(
                   context,
@@ -264,14 +277,18 @@ class _NotificationsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     if (notifications.isEmpty) {
       return ListView(
         padding: const EdgeInsets.all(20),
-        children: const [
+        children: [
           EmptyState(
             icon: Icons.notifications_outlined,
-            title: 'لا توجد تنبيهات',
-            subtitle: 'ستظهر هنا تنبيهات الجرعات الفائتة.',
+            title: strings.noNotifications,
+            subtitle: strings.pick(
+              'ستظهر هنا تنبيهات الجرعات الفائتة.',
+              'Missed-dose alerts will appear here.',
+            ),
           ),
         ],
       );
@@ -315,121 +332,18 @@ Future<void> _openPatientAction(BuildContext context) async {
     provider.listenToCaregiverData(caregiverUid);
   }
   if (!context.mounted) return;
+  final strings = AppStrings.of(context);
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(ok ? 'تمت إضافة المريض' : 'تعذرت إضافة المريض'),
+      content: Text(
+        ok
+            ? strings.pick('تمت إضافة المريض', 'Patient added')
+            : strings.pick('تعذرت إضافة المريض', 'Could not add patient'),
+      ),
       backgroundColor: ok ? AppColors.teal : AppColors.red,
       behavior: SnackBarBehavior.floating,
     ),
   );
-}
-
-class _PatientCard extends StatelessWidget {
-  final Map<String, dynamic> patient;
-
-  const _PatientCard({required this.patient});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SharedPatientMedicationsScreen(
-            patient: patient,
-            actorRole: 'caregiver',
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.skyLight,
-            child: Icon(Icons.person_rounded, color: AppColors.sky),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${patient['name'] ?? 'مريض'}',
-                    style: AppTextStyles.medName),
-                const SizedBox(height: 4),
-                Text('${patient['phone'] ?? ''}',
-                    style: AppTextStyles.medDetail),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_left_rounded),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReportCard extends StatelessWidget {
-  final Map<String, dynamic> report;
-  final VoidCallback onOpen;
-  final VoidCallback onReview;
-  final VoidCallback onArchive;
-
-  const _ReportCard({
-    required this.report,
-    required this.onOpen,
-    required this.onReview,
-    required this.onArchive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final data = (report['report'] as Map?) ?? const {};
-    final adherence = (((data['adherenceRate'] as num?) ?? 0) * 100).round();
-    final patientName = '${report['patientName'] ?? 'مريض'}';
-    final reviewed = report['reviewed'] == true || report['reviewedAt'] != null;
-    final type = '${report['reportType'] ?? data['reportType'] ?? 'monthly'}';
-
-    return AppCard(
-      onTap: onOpen,
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: AppColors.tealLight,
-            child: Icon(Icons.summarize_outlined, color: AppColors.teal),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(patientName, style: AppTextStyles.medName),
-                const SizedBox(height: 4),
-                Text(
-                  type == 'uploaded'
-                      ? '${data['fileName'] ?? data['label'] ?? 'ملف مرفوع'}'
-                      : 'معدل الالتزام $adherence%',
-                  style: AppTextStyles.medDetail,
-                ),
-              ],
-            ),
-          ),
-          AppBadge(
-            label: reviewed ? 'تمت المراجعة' : 'جديد',
-            variant: reviewed ? BadgeVariant.teal : BadgeVariant.amber,
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'review') onReview();
-              if (value == 'archive') onArchive();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'review', child: Text('تمت المراجعة')),
-              PopupMenuItem(value: 'archive', child: Text('أرشفة')),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _NotificationCard extends StatelessWidget {
@@ -454,8 +368,11 @@ class _NotificationCard extends StatelessWidget {
           Expanded(
             child: Text(
               notification.medicationName == null
-                  ? 'تنبيه جديد'
-                  : 'تنبيه جرعة: ${notification.medicationName}',
+                  ? AppStrings.of(context).pick('تنبيه جديد', 'New alert')
+                  : AppStrings.of(context).pick(
+                      'تنبيه جرعة: ${notification.medicationName}',
+                      'Dose alert: ${notification.medicationName}',
+                    ),
               style: AppTextStyles.medName,
             ),
           ),
@@ -511,11 +428,14 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final strings = AppStrings.of(context);
     Navigator.pop(
       context,
       _PatientAction(
         createNew: _createNew,
-        name: _nameCtrl.text.trim().isEmpty ? 'مريض' : _nameCtrl.text.trim(),
+        name: _nameCtrl.text.trim().isEmpty
+            ? strings.patient
+            : _nameCtrl.text.trim(),
         email: _emailCtrl.text.trim().toLowerCase(),
         password: _passwordCtrl.text,
         phone: _phoneCtrl.text.trim(),
@@ -529,8 +449,10 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final strings = AppStrings.of(context);
+    final isArabic = strings.isArabic;
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 16, 20, bottomInset + 20),
         child: ConstrainedBox(
@@ -545,21 +467,21 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'إضافة مريض',
+                    strings.addPatient,
                     style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   SegmentedButton<bool>(
-                    segments: const [
+                    segments: [
                       ButtonSegment(
                         value: true,
-                        label: Text('إنشاء'),
-                        icon: Icon(Icons.person_add_alt_1_rounded),
+                        label: Text(strings.create),
+                        icon: const Icon(Icons.person_add_alt_1_rounded),
                       ),
                       ButtonSegment(
                         value: false,
-                        label: Text('ربط'),
-                        icon: Icon(Icons.link_rounded),
+                        label: Text(strings.link),
+                        icon: const Icon(Icons.link_rounded),
                       ),
                     ],
                     selected: {_createNew},
@@ -568,37 +490,53 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   if (_createNew) ...[
-                    _field(_nameCtrl, 'اسم المريض', Icons.person_outline),
+                    _field(
+                      _nameCtrl,
+                      strings.pick('اسم المريض', 'Patient name'),
+                      Icons.person_outline,
+                    ),
                     _field(
                       _emailCtrl,
-                      'بريد المريض',
+                      strings.pick('بريد المريض', 'Patient email'),
                       Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) =>
                           value == null || !value.contains('@')
-                              ? 'أدخل بريد صحيح'
+                              ? strings.pick(
+                                  'أدخل بريد صحيح', 'Enter a valid email')
                               : null,
                     ),
                     _field(
                       _passwordCtrl,
-                      'كلمة المرور',
+                      strings.pick('كلمة المرور', 'Password'),
                       Icons.lock_outline_rounded,
                       obscure: true,
                       validator: (value) => value == null || value.length < 6
-                          ? 'كلمة المرور 6 أحرف على الأقل'
+                          ? strings.pick(
+                              'كلمة المرور 6 أحرف على الأقل',
+                              'Password must be at least 6 characters',
+                            )
                           : null,
                     ),
                   ],
                   _field(
                     _phoneCtrl,
-                    _createNew ? 'هاتف المريض' : 'هاتف المريض الحالي',
+                    _createNew
+                        ? strings.pick('هاتف المريض', 'Patient phone')
+                        : strings.pick(
+                            'هاتف المريض الحالي',
+                            'Existing patient phone',
+                          ),
                     Icons.phone_outlined,
                     keyboardType: TextInputType.phone,
                   ),
                   if (_createNew)
                     _field(
                       _conditionCtrl,
-                      'الحالة المزمنة (اختياري)',
+                      strings.pick(
+                        'الحالة المزمنة (اختياري)',
+                        'Chronic condition (optional)',
+                      ),
                       Icons.medical_information_outlined,
                       required: false,
                     ),
@@ -606,7 +544,11 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
                   FilledButton.icon(
                     onPressed: _submit,
                     icon: const Icon(Icons.check_rounded),
-                    label: Text(_createNew ? 'إنشاء المريض' : 'ربط المريض'),
+                    label: Text(
+                      _createNew
+                          ? strings.pick('إنشاء المريض', 'Create patient')
+                          : strings.linkPatient,
+                    ),
                   ),
                 ],
               ),
@@ -635,7 +577,10 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
         decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
         validator: validator ??
             (value) => required && (value == null || value.trim().isEmpty)
-                ? 'هذا الحقل مطلوب'
+                ? AppStrings.of(context).pick(
+                    'هذا الحقل مطلوب',
+                    'This field is required',
+                  )
                 : null,
       ),
     );

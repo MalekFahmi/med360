@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/firebase_backend_domains.dart';
 import '../../services/firebase_backend_service.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 import 'medications_screen.dart';
@@ -41,9 +43,10 @@ class _SharedPatientMedicationsScreenState
 
   Future<void> _load() async {
     try {
-      final meds = await FirebaseBackendService().fetchPatientMedications(
-        _patientUid.isNotEmpty ? _patientUid : _patientId,
-      );
+      final meds =
+          await FirebaseBackendService().medications.fetchPatientMedications(
+                _patientUid.isNotEmpty ? _patientUid : _patientId,
+              );
       if (!mounted) return;
       setState(() {
         _medications = meds;
@@ -53,8 +56,13 @@ class _SharedPatientMedicationsScreenState
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تعذر تحميل أدوية المريض'),
+        SnackBar(
+          content: Text(
+            AppStrings.of(context).pick(
+              'تعذر تحميل أدوية المريض',
+              'Could not load patient medications',
+            ),
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -74,18 +82,23 @@ class _SharedPatientMedicationsScreenState
     );
     if (saved == null) return;
     try {
-      await FirebaseBackendService().upsertPatientMedication(
-        patientUid: _patientUid,
-        patientId: _patientId,
-        medication: saved,
-        actorRole: widget.actorRole,
-      );
+      await FirebaseBackendService().medications.upsertPatientMedication(
+            patientUid: _patientUid,
+            patientId: _patientId,
+            medication: saved,
+            actorRole: widget.actorRole,
+          );
       await _load();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تعذر حفظ تغييرات الدواء'),
+        SnackBar(
+          content: Text(
+            AppStrings.of(context).pick(
+              'تعذر حفظ تغييرات الدواء',
+              'Could not save medication changes',
+            ),
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -94,23 +107,25 @@ class _SharedPatientMedicationsScreenState
 
   @override
   Widget build(BuildContext context) {
-    final patientName = '${widget.patient['name'] ?? 'مريض'}';
+    final strings = AppStrings.of(context);
+    final patientName = '${widget.patient['name'] ?? strings.patient}';
+    final isArabic = context.watch<AuthProvider>().arabicMode;
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: AppColors.pageTint,
-        appBar: AppBar(title: Text('أدوية $patientName')),
+        appBar: AppBar(title: Text(strings.medicationsFor(patientName))),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _medications.isEmpty
                 ? EmptyState(
                     icon: Icons.medication_outlined,
-                    title: 'لا توجد أدوية',
-                    subtitle: 'أضف دواء لهذا المريض',
+                    title: strings.noMedications,
+                    subtitle: strings.addMedicationForPatient,
                     action: FilledButton.icon(
                       onPressed: () => _editMedication(),
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('إضافة دواء'),
+                      label: Text(strings.addMedication),
                     ),
                   )
                 : ListView.builder(
@@ -119,10 +134,24 @@ class _SharedPatientMedicationsScreenState
                     itemBuilder: (context, index) {
                       final med = _medications[index];
                       final paused = med.status == MedicationStatus.paused;
-                      final notes = (med.notesAr ?? med.notes ?? '').trim();
-                      final indication = med.indicationAr.trim().isNotEmpty
-                          ? med.indicationAr.trim()
-                          : med.indication.trim();
+                      final notes = isArabic
+                          ? ((med.notesAr ?? '').trim().isNotEmpty
+                              ? med.notesAr!.trim()
+                              : (med.notes ?? '').trim())
+                          : ((med.notes ?? '').trim().isNotEmpty
+                              ? med.notes!.trim()
+                              : (med.notesAr ?? '').trim());
+                      final indication = isArabic
+                          ? (med.indicationAr.trim().isNotEmpty
+                              ? med.indicationAr.trim()
+                              : med.indication.trim())
+                          : (med.indication.trim().isNotEmpty
+                              ? med.indication.trim()
+                              : med.indicationAr.trim());
+                      final displayName =
+                          isArabic ? med.displayNameAr : med.displayName;
+                      final formLabel =
+                          isArabic ? med.formLabelAr : med.formLabel;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.md),
                         child: AppCard(
@@ -139,11 +168,11 @@ class _SharedPatientMedicationsScreenState
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(med.displayNameAr,
+                                        Text(displayName,
                                             style: AppTextStyles.medName),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '${med.formLabelAr} • ${med.dosage}',
+                                          '$formLabel • ${med.dosage}',
                                           style: AppTextStyles.medDetail,
                                         ),
                                       ],
@@ -154,22 +183,26 @@ class _SharedPatientMedicationsScreenState
                               ),
                               const SizedBox(height: AppSpacing.md),
                               Text(
-                                'الجرعات اليومية: ${_formatNumber(med.dosesPerDay)}',
+                                strings.dailyDoses(med.dosesPerDay),
                                 style: AppTextStyles.medDetail,
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'الأوقات: ${med.reminderTimes.map((time) => time.display).join('، ')}',
+                                strings.times(
+                                  med.reminderTimes
+                                      .map((time) => time.display)
+                                      .join(strings.pick('، ', ', ')),
+                                ),
                                 style: AppTextStyles.medDetail,
                               ),
                               if (indication.isNotEmpty) ...[
                                 const SizedBox(height: 4),
-                                Text('الاستخدام: $indication',
+                                Text(strings.indication(indication),
                                     style: AppTextStyles.medDetail),
                               ],
                               if (notes.isNotEmpty) ...[
                                 const SizedBox(height: 4),
-                                Text('ملاحظات: $notes',
+                                Text(strings.notes(notes),
                                     style: AppTextStyles.medDetail),
                               ],
                               const SizedBox(height: AppSpacing.sm),
@@ -178,15 +211,18 @@ class _SharedPatientMedicationsScreenState
                                 runSpacing: 6,
                                 children: [
                                   AppBadge(
-                                    label: paused ? 'متوقف' : 'نشط',
+                                    label: paused
+                                        ? strings.paused
+                                        : strings.active,
                                     variant: paused
                                         ? BadgeVariant.amber
                                         : BadgeVariant.green,
                                   ),
                                   if (med.quantityRemaining > 0)
                                     AppBadge(
-                                      label:
-                                          'المتبقي ${med.quantityRemaining} جرعة',
+                                      label: strings.remainingQuantity(
+                                        med.quantityRemaining,
+                                      ),
                                       variant: med.needsRefill
                                           ? BadgeVariant.red
                                           : BadgeVariant.teal,
@@ -204,14 +240,9 @@ class _SharedPatientMedicationsScreenState
           backgroundColor: AppColors.teal,
           foregroundColor: AppColors.white,
           icon: const Icon(Icons.add_rounded),
-          label: const Text('إضافة دواء'),
+          label: Text(strings.addMedication),
         ),
       ),
     );
-  }
-
-  String _formatNumber(double value) {
-    if (value == value.roundToDouble()) return value.toInt().toString();
-    return value.toStringAsFixed(1);
   }
 }

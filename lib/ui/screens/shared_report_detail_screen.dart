@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../providers/auth_provider.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -18,17 +21,19 @@ class SharedReportDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final payload = (report['report'] as Map?) ?? const {};
-    final patientName = '${report['patientName'] ?? 'مريض'}';
+    final strings = AppStrings.of(context);
+    final patientName = '${report['patientName'] ?? strings.patient}';
     final type =
         '${report['reportType'] ?? payload['reportType'] ?? 'monthly'}';
     final isUploaded = type == 'uploaded' || payload['downloadUrl'] != null;
-    final label = '${payload['label'] ?? 'تقرير'}';
+    final label = '${payload['label'] ?? strings.report}';
+    final isArabic = context.watch<AuthProvider>().arabicMode;
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: AppColors.pageTint,
-        appBar: AppBar(title: Text('تقرير $patientName')),
+        appBar: AppBar(title: Text(strings.reportTitle(patientName))),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -38,7 +43,7 @@ class SharedReportDetailScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _typeLabel(type),
+                    strings.typeLabel(type),
                     style: AppTextStyles.screenTitle.copyWith(fontSize: 26),
                   ),
                   const SizedBox(height: 6),
@@ -60,7 +65,7 @@ class SharedReportDetailScreen extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onReview,
                     icon: const Icon(Icons.check_rounded),
-                    label: const Text('تمت المراجعة'),
+                    label: Text(strings.reviewed),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -68,7 +73,7 @@ class SharedReportDetailScreen extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onArchive,
                     icon: const Icon(Icons.archive_outlined),
-                    label: const Text('أرشفة'),
+                    label: Text(strings.archive),
                   ),
                 ),
               ],
@@ -78,13 +83,6 @@ class SharedReportDetailScreen extends StatelessWidget {
       ),
     );
   }
-
-  String _typeLabel(String type) => switch (type) {
-        'daily' => 'تقرير يومي',
-        'weekly' => 'تقرير أسبوعي',
-        'uploaded' => 'ملف مرفوع',
-        _ => 'تقرير شهري',
-      };
 }
 
 class _StructuredReport extends StatelessWidget {
@@ -94,6 +92,7 @@ class _StructuredReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     final adherence = (((payload['adherenceRate'] as num?) ?? 0) * 100).round();
     final taken = ((payload['takenDoses'] as num?) ?? 0).toInt();
     final missed = ((payload['missedDoses'] as num?) ?? 0).toInt();
@@ -110,14 +109,14 @@ class _StructuredReport extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('ملخص الالتزام',
+              Text(strings.adherenceSummary,
                   style: AppTextStyles.screenTitle.copyWith(fontSize: 22)),
               const SizedBox(height: AppSpacing.md),
               Row(
                 children: [
                   Expanded(
                     child: MetricTile(
-                      label: 'الالتزام',
+                      label: strings.adherence,
                       value: '$adherence%',
                       valueColor: AppColors.teal,
                     ),
@@ -125,7 +124,7 @@ class _StructuredReport extends StatelessWidget {
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: MetricTile(
-                      label: 'مأخوذة',
+                      label: strings.taken,
                       value: '$taken',
                       valueColor: AppColors.green,
                     ),
@@ -137,7 +136,7 @@ class _StructuredReport extends StatelessWidget {
                 children: [
                   Expanded(
                     child: MetricTile(
-                      label: 'فائتة',
+                      label: strings.missed,
                       value: '$missed',
                       valueColor: AppColors.red,
                     ),
@@ -145,7 +144,7 @@ class _StructuredReport extends StatelessWidget {
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: MetricTile(
-                      label: 'معلقة',
+                      label: strings.pending,
                       value: '$pending',
                       valueColor: AppColors.amber,
                     ),
@@ -158,13 +157,13 @@ class _StructuredReport extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        Text('تفاصيل الأدوية',
+        Text(strings.medicationDetails,
             style: AppTextStyles.screenTitle.copyWith(fontSize: 22)),
         const SizedBox(height: AppSpacing.md),
         if (medications.isEmpty)
-          const EmptyState(
+          EmptyState(
             icon: Icons.medication_outlined,
-            title: 'لا توجد تفاصيل أدوية',
+            title: strings.noMedicationDetails,
           )
         else
           ...medications.map(
@@ -187,7 +186,8 @@ class _MedicationReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = '${item['medicationName'] ?? 'دواء'}';
+    final strings = AppStrings.of(context);
+    final name = '${item['medicationName'] ?? strings.medications}';
     final adherence = (((item['adherenceRate'] as num?) ?? 0) * 100).round();
     final taken = ((item['takenDoses'] as num?) ?? 0).toInt();
     final missed = ((item['missedDoses'] as num?) ?? 0).toInt();
@@ -213,7 +213,11 @@ class _MedicationReportCard extends StatelessWidget {
           AdherenceBar(rate: adherence / 100, height: 10),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'مأخوذة $taken • فائتة $missed • معلقة $pending',
+            strings.medicationReportStats(
+              taken: taken,
+              missed: missed,
+              pending: pending,
+            ),
             style: AppTextStyles.medDetail,
           ),
         ],
@@ -229,7 +233,9 @@ class _UploadedReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fileName = '${payload['fileName'] ?? payload['label'] ?? 'ملف'}';
+    final strings = AppStrings.of(context);
+    final fileName =
+        '${payload['fileName'] ?? payload['label'] ?? strings.uploadedFile}';
     final size = ((payload['sizeBytes'] as num?) ?? 0).toInt();
 
     return AppCard(
@@ -244,7 +250,9 @@ class _UploadedReportCard extends StatelessWidget {
                 Text(fileName, style: AppTextStyles.medName),
                 const SizedBox(height: 4),
                 Text(
-                  size == 0 ? 'ملف مرفوع' : '${(size / 1024).round()} KB',
+                  size == 0
+                      ? strings.uploadedFile
+                      : '${(size / 1024).round()} KB',
                   style: AppTextStyles.medDetail,
                 ),
               ],

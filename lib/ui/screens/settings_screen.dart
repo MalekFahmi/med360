@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
+import '../i18n/app_strings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -13,10 +14,11 @@ class SettingsScreen extends StatelessWidget {
     final auth = context.watch<AuthProvider>();
     final patient = auth.patient;
     final isAr = auth.arabicMode;
+    final strings = AppStrings(isAr);
 
     return Scaffold(
       backgroundColor: AppColors.pageTint,
-      appBar: AppBar(title: Text(isAr ? 'الإعدادات' : 'Settings')),
+      appBar: AppBar(title: Text(strings.settings)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -70,12 +72,12 @@ class SettingsScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isAr ? 'اللغة' : 'Language',
+                        strings.language,
                         style: AppTextStyles.medName,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        isAr ? 'العربية' : 'English',
+                        isAr ? strings.arabic : strings.english,
                         style: AppTextStyles.medDetail,
                       ),
                     ],
@@ -96,7 +98,7 @@ class SettingsScreen extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: () => auth.logout(),
             icon: const Icon(Icons.logout_rounded),
-            label: Text(isAr ? 'تسجيل الخروج' : 'Log out'),
+            label: Text(strings.logout),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.red,
               side: const BorderSide(color: AppColors.red),
