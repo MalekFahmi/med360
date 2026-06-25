@@ -194,9 +194,53 @@ class LocalDbService {
   Future<void> updateMedication(String patientId, Medication med) async =>
       insertMedication(patientId, med);
 
-  Future<void> deleteMedication(String medicationId) async {
+  Future<void> deleteMedication(String medicationId,
+      {String? patientId}) async {
     final d = await db;
-    await d.delete('medications', where: 'id = ?', whereArgs: [medicationId]);
+    await d.delete(
+      'medications',
+      where: patientId == null ? 'id = ?' : 'id = ? AND patientId = ?',
+      whereArgs: patientId == null ? [medicationId] : [medicationId, patientId],
+    );
+  }
+
+  Future<List<DoseConfirmation>> getPendingDosesForMedication({
+    required String patientId,
+    required String medicationId,
+  }) async {
+    final d = await db;
+    final rows = await d.query(
+      'dose_confirmations',
+      where: 'patientId = ? AND medicationId = ? AND status = ?',
+      whereArgs: [patientId, medicationId, DoseStatus.pending.name],
+    );
+    return rows
+        .map((r) => DoseConfirmation(
+              id: r['id'] as String,
+              medicationId: r['medicationId'] as String,
+              medicationName: r['medicationName'] as String,
+              scheduledTime: r['scheduledTime'] as String,
+              scheduledDate: DateTime.parse(r['scheduledDate'] as String),
+              confirmedAt: r['confirmedAt'] != null
+                  ? DateTime.parse(r['confirmedAt'] as String)
+                  : null,
+              status: DoseStatus.values.byName(r['status'] as String),
+              caregiverNotified: r['caregiverNotified'] == 1,
+              secondReminderSent: r['secondReminderSent'] == 1,
+            ))
+        .toList();
+  }
+
+  Future<void> deletePendingDosesForMedication({
+    required String patientId,
+    required String medicationId,
+  }) async {
+    final d = await db;
+    await d.delete(
+      'dose_confirmations',
+      where: 'patientId = ? AND medicationId = ? AND status = ?',
+      whereArgs: [patientId, medicationId, DoseStatus.pending.name],
+    );
   }
 
   Future<List<Medication>> getMedications(String patientId) async {

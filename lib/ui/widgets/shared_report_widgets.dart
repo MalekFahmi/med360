@@ -9,6 +9,7 @@ class SharedReportCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onReview;
   final VoidCallback onArchive;
+  final VoidCallback? onRestore;
 
   const SharedReportCard({
     super.key,
@@ -16,6 +17,7 @@ class SharedReportCard extends StatelessWidget {
     required this.onOpen,
     required this.onReview,
     required this.onArchive,
+    this.onRestore,
   });
 
   @override
@@ -25,7 +27,9 @@ class SharedReportCard extends StatelessWidget {
     final adherence = (((data['adherenceRate'] as num?) ?? 0) * 100).round();
     final patientName = '${report['patientName'] ?? strings.patient}';
     final reviewed = report['reviewed'] == true || report['reviewedAt'] != null;
+    final archived = report['archived'] == true;
     final type = '${report['reportType'] ?? data['reportType'] ?? 'monthly'}';
+    final label = '${data['label'] ?? ''}'.trim();
 
     return AppCard(
       onTap: onOpen,
@@ -45,9 +49,13 @@ class SharedReportCard extends StatelessWidget {
                 Text(
                   type == 'uploaded'
                       ? '${data['fileName'] ?? data['label'] ?? strings.uploadedFile}'
-                      : strings.adherencePercent(adherence),
+                      : '${strings.typeLabel(type)} · ${strings.adherencePercent(adherence)}',
                   style: AppTextStyles.medDetail,
                 ),
+                if (label.isNotEmpty && type != 'uploaded') ...[
+                  const SizedBox(height: 3),
+                  Text(label, style: AppTextStyles.metricLabel),
+                ],
               ],
             ),
           ),
@@ -59,6 +67,7 @@ class SharedReportCard extends StatelessWidget {
             onSelected: (value) {
               if (value == 'review') onReview();
               if (value == 'archive') onArchive();
+              if (value == 'restore') onRestore?.call();
             },
             itemBuilder: (_) => [
               PopupMenuItem(
@@ -66,8 +75,12 @@ class SharedReportCard extends StatelessWidget {
                 child: Text(strings.reviewed),
               ),
               PopupMenuItem(
-                value: 'archive',
-                child: Text(strings.archive),
+                value: archived ? 'restore' : 'archive',
+                child: Text(
+                  archived
+                      ? strings.pick('استعادة', 'Restore')
+                      : strings.archive,
+                ),
               ),
             ],
           ),

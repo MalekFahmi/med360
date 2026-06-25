@@ -48,8 +48,20 @@ class FirebaseCareTeamDomain {
       _backend.fetchAssignedPatientsForDoctor(doctorUid);
   Future<bool> linkPatientToCurrentDoctorByPhone(String phone) =>
       _backend.linkPatientToCurrentDoctorByPhone(phone);
+  Future<bool> linkPatientToCurrentDoctor(String identifier) =>
+      _backend.linkPatientToCurrentDoctor(identifier);
   Future<bool> linkExistingPatientToCurrentCaregiverByPhone(String phone) =>
       _backend.linkExistingPatientToCurrentCaregiverByPhone(phone);
+  Future<bool> linkExistingPatientToCurrentCaregiver(String identifier) =>
+      _backend.linkExistingPatientToCurrentCaregiver(identifier);
+  Future<void> unlinkCurrentCaregiverFromPatient({
+    required String patientUid,
+  }) =>
+      _backend.unlinkCurrentCaregiverFromPatient(patientUid: patientUid);
+  Future<void> unlinkCurrentDoctorFromPatient({
+    required String patientUid,
+  }) =>
+      _backend.unlinkCurrentDoctorFromPatient(patientUid: patientUid);
   Future<Map<String, dynamic>?> createManagedPatientForCaregiver({
     required String name,
     required String email,
@@ -97,6 +109,28 @@ class FirebaseMedicationDomain {
       );
   Future<List<Medication>> fetchPatientMedications(String patientUid) =>
       _backend.fetchPatientMedications(patientUid);
+  Future<void> deletePatientMedication({
+    required String patientUid,
+    required String patientId,
+    required String medicationId,
+    Medication? medication,
+    required String actorRole,
+  }) =>
+      _backend.deletePatientMedication(
+        patientUid: patientUid,
+        patientId: patientId,
+        medicationId: medicationId,
+        medication: medication,
+        actorRole: actorRole,
+      );
+  Future<void> deletePendingDosesForMedication({
+    required String patientId,
+    required String medicationId,
+  }) =>
+      _backend.deletePendingDosesForMedication(
+        patientId: patientId,
+        medicationId: medicationId,
+      );
   Future<void> logMedicationModification({
     required String patientId,
     String? patientUid,
@@ -171,6 +205,7 @@ class FirebaseReportDomain {
   Future<void> markReviewed(String reportId) =>
       _backend.markReportReviewed(reportId);
   Future<void> archive(String reportId) => _backend.archiveReport(reportId);
+  Future<void> restore(String reportId) => _backend.restoreReport(reportId);
 }
 
 class FirebaseNotificationDomain {

@@ -56,7 +56,18 @@ class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final VoidCallback? onTap;
-  const AppCard({super.key, required this.child, this.padding, this.onTap});
+  final Color? color;
+  final Color? borderColor;
+  final double elevation;
+  const AppCard({
+    super.key,
+    required this.child,
+    this.padding,
+    this.onTap,
+    this.color,
+    this.borderColor,
+    this.elevation = 1,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -64,22 +75,37 @@ class AppCard extends StatelessWidget {
       padding: padding ?? const EdgeInsets.all(AppSpacing.lg),
       child: child,
     );
-    return Container(
+    const radius = AppRadius.md;
+    final ink = Ink(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: AppRadius.md,
-        border: Border.all(color: Colors.black.withValues(alpha: 0.045)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.045),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        color: color ?? Theme.of(context).colorScheme.surface,
+        borderRadius: radius,
+        border: Border.all(color: borderColor ?? AppColors.border),
       ),
-      child: onTap != null
-          ? InkWell(onTap: onTap, borderRadius: AppRadius.md, child: inner)
-          : inner,
+      child: inner,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: elevation <= 0
+            ? const []
+            : [
+                BoxShadow(
+                  color: AppColors.shadow.withValues(alpha: 0.55),
+                  blurRadius: 18,
+                  spreadRadius: -8,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: radius,
+        clipBehavior: Clip.antiAlias,
+        child: onTap != null
+            ? InkWell(onTap: onTap, borderRadius: radius, child: ink)
+            : ink,
+      ),
     );
   }
 }
@@ -131,7 +157,7 @@ class AdherenceBar extends StatelessWidget {
         child: LinearProgressIndicator(
           value: rate,
           minHeight: height,
-          backgroundColor: AppColors.grayLight,
+          backgroundColor: AppColors.border,
           valueColor: AlwaysStoppedAnimation(_color),
         ),
       );
@@ -197,30 +223,52 @@ class MetricTile extends StatelessWidget {
   final String label;
   final String value;
   final Color valueColor;
+  final IconData? icon;
   const MetricTile({
     super.key,
     required this.label,
     required this.value,
     this.valueColor = AppColors.grayDark,
+    this.icon,
   });
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: const BoxDecoration(
-          color: AppColors.grayLight,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
           borderRadius: AppRadius.md,
+          border: Border.all(color: AppColors.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: AppTextStyles.metricLabel),
-            const SizedBox(height: 2),
+            if (icon != null) ...[
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: valueColor.withValues(alpha: 0.12),
+                  borderRadius: AppRadius.sm,
+                ),
+                child: Icon(icon, color: valueColor, size: 18),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            Text(
+              label,
+              style: AppTextStyles.metricLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
             Text(
               value,
               style: AppTextStyles.metricValue.copyWith(
-                fontSize: 26,
+                fontSize: 28,
                 color: valueColor,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -400,18 +448,18 @@ class EmptyState extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 72,
-                height: 72,
+                width: 78,
+                height: 78,
                 decoration: const BoxDecoration(
                   color: AppColors.tealLight,
                   borderRadius: AppRadius.lg,
                 ),
-                child: Icon(icon, size: 36, color: AppColors.teal),
+                child: Icon(icon, size: 38, color: AppColors.tealDark),
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(
                 title,
-                style: AppTextStyles.screenTitle.copyWith(fontSize: 17),
+                style: AppTextStyles.screenTitle.copyWith(fontSize: 19),
                 textAlign: TextAlign.center,
               ),
               if (subtitle != null) ...[

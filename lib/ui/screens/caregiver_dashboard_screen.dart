@@ -42,11 +42,14 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
     final reports = provider.sharedReports
         .where((report) => report['archived'] != true)
         .toList();
+    final archivedReports = provider.sharedReports
+        .where((report) => report['archived'] == true)
+        .toList();
 
     return Directionality(
       textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: DefaultTabController(
-        length: 3,
+        length: 4,
         child: Scaffold(
           backgroundColor: AppColors.pageTint,
           appBar: AppBar(
@@ -67,6 +70,9 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                     icon: const Icon(Icons.summarize_outlined),
                     text: strings.reports),
                 Tab(
+                    icon: const Icon(Icons.archive_outlined),
+                    text: strings.pick('الأرشيف', 'Archive')),
+                Tab(
                     icon: const Icon(Icons.notifications_outlined),
                     text: strings.notifications),
               ],
@@ -83,11 +89,26 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                   unreadCount: provider.unreadCount,
                   reportsCount: reports.length,
                   onAdd: () => _openPatientAction(context),
+                  onDelete: (patient) => _confirmUnlinkPatient(context, patient),
+                  onPermissionChanged: (patient, permission) =>
+                      provider.updateLinkedPatientPermission(
+                    patientUid: '${patient['patientUid'] ?? ''}',
+                    patientId: '${patient['patientId'] ?? ''}',
+                    permission: permission,
+                  ),
                 ),
                 _ReportsTab(
                   reports: reports,
                   onReview: provider.markReportReviewed,
                   onArchive: provider.archiveReport,
+                  onRestore: provider.restoreReport,
+                ),
+                _ReportsTab(
+                  reports: archivedReports,
+                  archived: true,
+                  onReview: provider.markReportReviewed,
+                  onArchive: provider.archiveReport,
+                  onRestore: provider.restoreReport,
                 ),
                 _NotificationsTab(notifications: provider.notifications),
               ],
@@ -99,6 +120,39 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
   }
 }
 
+Future<void> _confirmUnlinkPatient(
+  BuildContext context,
+  Map<String, dynamic> patient,
+) async {
+  final strings = AppStrings.of(context);
+  final name = '${patient['name'] ?? strings.patient}';
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(strings.pick('حذف المريض؟', 'Remove patient?')),
+      content: Text(
+        strings.pick(
+          'سيتم حذف $name من لوحة المرافق فقط، ولن يتم حذف حساب المريض.',
+          '$name will be removed from this caregiver dashboard only. The patient account will not be deleted.',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: Text(strings.pick('إلغاء', 'Cancel')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          style: FilledButton.styleFrom(backgroundColor: AppColors.red),
+          child: Text(strings.pick('حذف', 'Remove')),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  await context.read<CaregiverProvider>().unlinkPatient(patient);
+}
+
 class _PatientsTab extends StatelessWidget {
   final String caregiverName;
   final String caregiverEmail;
@@ -106,6 +160,11 @@ class _PatientsTab extends StatelessWidget {
   final int unreadCount;
   final int reportsCount;
   final VoidCallback onAdd;
+  final ValueChanged<Map<String, dynamic>> onDelete;
+  final Future<void> Function(
+    Map<String, dynamic> patient,
+    NotificationPermission permission,
+  ) onPermissionChanged;
 
   const _PatientsTab({
     required this.caregiverName,
@@ -114,6 +173,8 @@ class _PatientsTab extends StatelessWidget {
     required this.unreadCount,
     required this.reportsCount,
     required this.onAdd,
+    required this.onDelete,
+    required this.onPermissionChanged,
   });
 
   @override
@@ -207,9 +268,88 @@ class _PatientsTab extends StatelessWidget {
               child: SharedPatientCard(
                 patient: patient,
                 actorRole: 'caregiver',
+                footer: Column(
+                  children: [
+                    _PatientPermissionControl(
+                      permission: _patientPermission(patient),
+                      onChanged: '${patient['patientUid'] ?? ''}'.isEmpty
+                          ? null
+                          : (permission) =>
+                              onPermissionChanged(patient, permission),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: OutlinedButton.icon(
+                        onPressed: () => onDelete(patient),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        label: Text(strings.pick('حذف المريض', 'Remove')),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.red,
+                          side: const BorderSide(color: AppColors.red),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  NotificationPermission _patientPermission(Map<String, dynamic> patient) {
+    final raw = '${patient['permission'] ?? NotificationPermission.all.name}';
+    return NotificationPermission.values.firstWhere(
+      (permission) => permission.name == raw,
+      orElse: () => NotificationPermission.all,
+    );
+  }
+}
+
+class _PatientPermissionControl extends StatelessWidget {
+  final NotificationPermission permission;
+  final ValueChanged<NotificationPermission>? onChanged;
+
+  const _PatientPermissionControl({
+    required this.permission,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            strings.pick('صلاحية المرافقة', 'Care access'),
+            style: AppTextStyles.medDetail,
+          ),
+        ),
+        DropdownButton<NotificationPermission>(
+          value: permission,
+          onChanged: onChanged == null
+              ? null
+              : (value) {
+                  if (value != null) onChanged!(value);
+                },
+          items: [
+            DropdownMenuItem(
+              value: NotificationPermission.all,
+              child: Text(strings.pick('وصول كامل', 'Full access')),
+            ),
+            DropdownMenuItem(
+              value: NotificationPermission.missedDoseOnly,
+              child: Text(strings.pick('تنبيهات فقط', 'Alerts only')),
+            ),
+            DropdownMenuItem(
+              value: NotificationPermission.none,
+              child: Text(strings.pick('بدون تنبيهات', 'No alerts')),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -217,13 +357,17 @@ class _PatientsTab extends StatelessWidget {
 
 class _ReportsTab extends StatelessWidget {
   final List<Map<String, dynamic>> reports;
+  final bool archived;
   final ValueChanged<String> onReview;
   final ValueChanged<String> onArchive;
+  final ValueChanged<String> onRestore;
 
   const _ReportsTab({
     required this.reports,
+    this.archived = false,
     required this.onReview,
     required this.onArchive,
+    required this.onRestore,
   });
 
   @override
@@ -235,8 +379,15 @@ class _ReportsTab extends StatelessWidget {
         children: [
           EmptyState(
             icon: Icons.summarize_outlined,
-            title: strings.noSharedReports,
-            subtitle: strings.sharedReportsHint,
+            title: archived
+                ? strings.pick('لا توجد تقارير مؤرشفة', 'No archived reports')
+                : strings.noSharedReports,
+            subtitle: archived
+                ? strings.pick(
+                    'ستظهر هنا التقارير التي تقوم بأرشفتها.',
+                    'Reports you archive will appear here.',
+                  )
+                : strings.sharedReportsHint,
           ),
         ],
       );
@@ -257,11 +408,13 @@ class _ReportsTab extends StatelessWidget {
                       report: report,
                       onReview: () => onReview('${report['id'] ?? ''}'),
                       onArchive: () => onArchive('${report['id'] ?? ''}'),
+                      onRestore: () => onRestore('${report['id'] ?? ''}'),
                     ),
                   ),
                 ),
                 onReview: () => onReview('${report['id'] ?? ''}'),
                 onArchive: () => onArchive('${report['id'] ?? ''}'),
+                onRestore: () => onRestore('${report['id'] ?? ''}'),
               ),
             ),
           )
@@ -327,7 +480,7 @@ Future<void> _openPatientAction(BuildContext context) async {
           phone: action.phone,
           chronicCondition: action.chronicCondition,
         )
-      : await provider.linkExistingPatientByPhone(action.phone);
+      : await provider.linkExistingPatient(action.phone);
   if (ok && caregiverUid != null) {
     provider.listenToCaregiverData(caregiverUid);
   }
@@ -524,11 +677,13 @@ class _PatientActionSheetState extends State<_PatientActionSheet> {
                     _createNew
                         ? strings.pick('هاتف المريض', 'Patient phone')
                         : strings.pick(
-                            'هاتف المريض الحالي',
-                            'Existing patient phone',
+                            'بريد أو هاتف المريض الحالي',
+                            'Existing patient email or phone',
                           ),
                     Icons.phone_outlined,
-                    keyboardType: TextInputType.phone,
+                    keyboardType: _createNew
+                        ? TextInputType.phone
+                        : TextInputType.emailAddress,
                   ),
                   if (_createNew)
                     _field(

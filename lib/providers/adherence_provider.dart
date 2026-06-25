@@ -133,7 +133,10 @@ class AdherenceProvider extends ChangeNotifier {
         caregiverAlertsEnabled: caregiverAlertsEnabled,
         isArabic: isArabic,
       );
-      await _schedulePendingEscalations(isArabic: isArabic);
+      await _schedulePendingEscalations(
+        patientId: patientId,
+        isArabic: isArabic,
+      );
       _status = LoadStatus.loaded;
     } catch (e) {
       _errorMessage = 'تعذر تحميل سجل الجرعات / Could not load dose history.';
@@ -143,12 +146,23 @@ class AdherenceProvider extends ChangeNotifier {
   }
 
   // ── FR5: Confirm taken ────────────────────────────────────────────────────
-  Future<void> confirmDoseTaken(
+  Future<bool> confirmDoseTaken(
     String doseId,
     String patientId, {
     String source = 'patient',
   }) async {
     final confirmedAt = DateTime.now();
+    DoseConfirmation? targetDose;
+    for (final dose in _allDoses) {
+      if (dose.id == doseId) {
+        targetDose = dose;
+        break;
+      }
+    }
+    if (targetDose == null ||
+        !canConfirmDoseNow(targetDose, now: confirmedAt)) {
+      return false;
+    }
     _allDoses = _allDoses.map((d) {
       if (d.id != doseId) return d;
       return d.copyWith(status: DoseStatus.taken, confirmedAt: confirmedAt);
@@ -202,6 +216,37 @@ class AdherenceProvider extends ChangeNotifier {
       );
       notifyListeners();
     }
+    return true;
+  }
+
+  Future<DoseConfirmation> ensurePendingDose({
+    required String patientId,
+    required Medication medication,
+    required String scheduledTime,
+    DateTime? date,
+  }) async {
+    final target = date ?? DateTime.now();
+    final doseDate = DateTime(target.year, target.month, target.day);
+    final existing = _allDoses.where(
+      (dose) =>
+          dose.medicationId == medication.id &&
+          dose.scheduledTime == scheduledTime &&
+          dose.isOnDate(doseDate),
+    );
+    if (existing.isNotEmpty) return existing.first;
+
+    final dose = DoseConfirmation(
+      id: '${medication.id}-${_dateKey(doseDate)}-$scheduledTime',
+      medicationId: medication.id,
+      medicationName: medication.displayName,
+      scheduledTime: scheduledTime,
+      scheduledDate: doseDate,
+      status: DoseStatus.pending,
+    );
+    _allDoses = [..._allDoses, dose];
+    await _db.insertDose(patientId, dose);
+    notifyListeners();
+    return dose;
   }
 
   // ── FR5 + FR8: Confirm missed, return caregiver IDs to alert ─────────────
@@ -257,6 +302,64 @@ class AdherenceProvider extends ChangeNotifier {
 
     if (!caregiverAlertsEnabled) return [];
     return alertableCaregivers.map((c) => c.id).toList();
+  }
+
+  Future<DoseConfirmation?> rescheduleDose(
+    String doseId,
+    String patientId,
+    DateTime scheduledFor, {
+    String source = 'patient',
+    required bool isArabic,
+  }) async {
+    final time = _formatTime(scheduledFor);
+    DoseConfirmation? updated;
+    _allDoses = _allDoses.map((dose) {
+      if (dose.id != doseId) return dose;
+      updated = dose.copyWith(
+        scheduledDate: DateTime(
+          scheduledFor.year,
+          scheduledFor.month,
+          scheduledFor.day,
+        ),
+        scheduledTime: time,
+        secondReminderSent: false,
+      );
+      return updated!;
+    }).toList();
+    if (updated == null) return null;
+
+    notifyListeners();
+    await _db.updateDose(patientId, updated!);
+    await NotificationService().cancelDoseEscalation(updated!);
+    await EscalationService().cancelDoseAutoMiss(updated!);
+    await NotificationService().scheduleDoseEscalation(
+      updated!,
+      patientId: patientId,
+      isArabic: isArabic,
+    );
+    await EscalationService().scheduleDoseAutoMiss(updated!);
+    await _tryCloud(
+      'rescheduled dose status sync',
+      () => FirebaseBackendService().updateDoseStatus(
+        patientId: patientId,
+        dose: updated!,
+      ),
+    );
+    await _tryCloud(
+      'rescheduled dose analytics',
+      () => FirebaseBackendService().analytics.logAdherenceEvent(
+        patientId: patientId,
+        medicationId: updated!.medicationId,
+        eventType: 'doseRescheduled',
+        source: source,
+        details: {
+          'doseId': updated!.id,
+          'scheduledTime': updated!.scheduledTime,
+          'scheduledDate': updated!.scheduledDate.toIso8601String(),
+        },
+      ),
+    );
+    return updated;
   }
 
   Future<List<DoseConfirmation>> markOverdueDosesMissed(
@@ -324,6 +427,17 @@ class AdherenceProvider extends ChangeNotifier {
   bool _isOverdue(DoseConfirmation dose, DateTime now) => now
       .isAfter(_scheduledDateTime(dose).add(EscalationService.autoMissDelay));
 
+  bool canConfirmDoseNow(
+    DoseConfirmation dose, {
+    DateTime? now,
+    Duration earlyWindow = const Duration(minutes: 30),
+  }) {
+    if (!dose.isPending) return false;
+    final current = now ?? DateTime.now();
+    final earliest = _scheduledDateTime(dose).subtract(earlyWindow);
+    return !current.isBefore(earliest);
+  }
+
   Future<void> _mirrorPendingDoses({
     required String patientId,
     required String patientName,
@@ -346,10 +460,14 @@ class AdherenceProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _schedulePendingEscalations({required bool isArabic}) async {
+  Future<void> _schedulePendingEscalations({
+    required String patientId,
+    required bool isArabic,
+  }) async {
     for (final dose in _allDoses.where((dose) => dose.isPending)) {
       await NotificationService().scheduleDoseEscalation(
         dose,
+        patientId: patientId,
         isArabic: isArabic,
       );
       await EscalationService().scheduleDoseAutoMiss(dose);
@@ -368,6 +486,12 @@ class AdherenceProvider extends ChangeNotifier {
       minute,
     );
   }
+
+  String _formatTime(DateTime dateTime) =>
+      '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+
+  String _dateKey(DateTime date) =>
+      '${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
 
   Future<void> _tryCloud(String label, Future<void> Function() action) async {
     try {

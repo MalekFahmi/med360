@@ -99,6 +99,52 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
+  Future<void> _signupWithGoogle() async {
+    final phone = _phoneCtrl.text.trim();
+    final specialty = _specialtyCtrl.text.trim();
+    if ((_caregiverMode || _doctorMode) && phone.length < 7) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أدخل رقم هاتف صحيح قبل التسجيل باستخدام Google'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (_doctorMode && specialty.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أدخل التخصص الطبي قبل التسجيل باستخدام Google'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.signInWithGoogle(
+      role: widget.selectedRole,
+      phone: phone.isEmpty ? null : phone,
+      specialty: specialty.isEmpty ? null : specialty,
+      licenseNumber:
+          _licenseCtrl.text.trim().isEmpty ? null : _licenseCtrl.text.trim(),
+      dateOfBirth: _dob,
+      chronicCondition:
+          _condCtrl.text.trim().isEmpty ? null : _condCtrl.text.trim(),
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(auth.errorMessage ?? 'تعذر التسجيل باستخدام Google'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -247,6 +293,12 @@ class _SignupScreenState extends State<SignupScreen> {
                                 : _caregiverMode
                                     ? 'إنشاء حساب مرافق'
                                     : 'إنشاء حساب'),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      OutlinedButton.icon(
+                        onPressed: auth.isLoading ? null : _signupWithGoogle,
+                        icon: const Icon(Icons.g_mobiledata_rounded),
+                        label: const Text('التسجيل باستخدام Google'),
                       ),
                     ],
                   ),

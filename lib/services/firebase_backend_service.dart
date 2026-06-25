@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../firebase_options.dart';
 import '../models/models.dart';
@@ -138,7 +139,7 @@ class FirebaseBackendService {
     final data = doc.data();
     if (data == null || data['role'] != 'caregiver') return null;
     await registerCaregiverDevice();
-    return CaregiverUser.fromMap(data);
+    return CaregiverUser.fromMap({...data, 'uid': uid});
   }
 
   Future<DoctorUser?> currentDoctor() async {
@@ -316,6 +317,9 @@ class FirebaseBackendService {
   }
 
   Future<void> _writePatientUserDoc(String uid, PatientUser patient) async {
+    final patientEmail =
+        patient.phone.contains('@') ? patient.phone.trim().toLowerCase() : null;
+
     debugPrint(
       '_writePatientUserDoc writing users/$uid and patients/$uid '
       '(local patientId=${patient.id})',
@@ -328,6 +332,8 @@ class FirebaseBackendService {
       'name': patient.name,
       'phone': patient.phone,
       'phoneNormalized': normalizePhone(patient.phone),
+      if (patientEmail != null) 'email': patientEmail,
+      if (patientEmail != null) 'emailLower': patientEmail,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     await _firestore!.collection('patients').doc(uid).set({
@@ -337,6 +343,8 @@ class FirebaseBackendService {
       'name': patient.name,
       'phone': patient.phone,
       'phoneNormalized': normalizePhone(patient.phone),
+      if (patientEmail != null) 'email': patientEmail,
+      if (patientEmail != null) 'emailLower': patientEmail,
       'dateOfBirth': patient.dateOfBirth?.toIso8601String(),
       'chronicCondition': patient.chronicCondition,
       'arabicMode': patient.arabicMode,
@@ -358,6 +366,204 @@ class FirebaseBackendService {
     if (phone.contains('@')) return phone.trim().toLowerCase();
     final normalized = phone.replaceAll(RegExp(r'[^0-9]'), '');
     return '$normalized@patients.med360.local';
+  }
+
+  Future<void> sendPasswordResetEmail(String email) async {
+    if (!_enabled || _auth == null) {
+      throw StateError('Firebase is not initialized.');
+    }
+    final normalizedEmail = email.trim().toLowerCase();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+        .hasMatch(normalizedEmail)) {
+      throw StateError('invalid-email');
+    }
+    await _auth!.sendPasswordResetEmail(email: normalizedEmail);
+  }
+
+  Future<PatientUser> signInPatientWithGoogle({
+    String? phone,
+    DateTime? dateOfBirth,
+    String? chronicCondition,
+  }) async {
+    final user = await _signInWithGoogleUser();
+    final uid = user.uid;
+    final email = (user.email ?? '').trim().toLowerCase();
+    final existing = await _firestore!.collection('users').doc(uid).get();
+    final existingData = existing.data();
+    if (existingData != null &&
+        existingData['role'] != null &&
+        existingData['role'] != 'patient') {
+      await _auth!.signOut();
+      throw StateError('This Google account is registered for another role.');
+    }
+
+    if (existingData != null && existingData['role'] == 'patient') {
+      final patient = await fetchPatientByUid(uid);
+      if (patient == null) {
+        throw StateError('Patient profile was not found.');
+      }
+      await registerPatientDevice(patient);
+      return patient;
+    }
+
+    final patient = PatientUser(
+      id: 'PAT-${DateTime.now().millisecondsSinceEpoch}',
+      name: _displayNameForGoogleUser(user),
+      phone: (phone?.trim().isNotEmpty == true ? phone!.trim() : email),
+      passwordHash: '',
+      dateOfBirth: dateOfBirth,
+      chronicCondition: chronicCondition,
+      caregivers: const [],
+      createdAt: DateTime.now(),
+    );
+    await _writePatientUserDoc(uid, patient);
+    await _firestore!.collection('users').doc(uid).set({
+      'email': email,
+      'emailLower': email,
+      'authProvider': 'google',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _firestore!.collection('patients').doc(uid).set({
+      'email': email,
+      'emailLower': email,
+      'authProvider': 'google',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _firestore!.collection('patientDirectory').doc(uid).set({
+      'email': email,
+      'emailLower': email,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await registerPatientDevice(patient);
+    return patient;
+  }
+
+  Future<CaregiverUser> signInCaregiverWithGoogle({String? phone}) async {
+    final user = await _signInWithGoogleUser();
+    final uid = user.uid;
+    final email = (user.email ?? '').trim().toLowerCase();
+    final doc = await _firestore!.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data != null && data['role'] != null && data['role'] != 'caregiver') {
+      await _auth!.signOut();
+      throw StateError('This Google account is registered for another role.');
+    }
+
+    if (data != null && data['role'] == 'caregiver') {
+      await registerCaregiverDevice();
+      return CaregiverUser.fromMap({...data, 'uid': uid});
+    }
+
+    if (phone == null || phone.trim().isEmpty) {
+      await _auth!.signOut();
+      throw StateError('Complete caregiver signup before using Google login.');
+    }
+
+    final caregiver = CaregiverUser(
+      uid: uid,
+      name: _displayNameForGoogleUser(user),
+      email: email,
+      phone: phone.trim(),
+    );
+    await _firestore!.collection('users').doc(uid).set({
+      'uid': caregiver.uid,
+      'name': caregiver.name,
+      'email': caregiver.email,
+      'phone': caregiver.phone,
+      'role': 'caregiver',
+      'phoneNormalized': normalizePhone(caregiver.phone),
+      'authProvider': 'google',
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastSeen': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _writeCaregiverDirectory(
+      uid: uid,
+      name: caregiver.name,
+      email: caregiver.email,
+      phone: caregiver.phone,
+    );
+    await registerCaregiverDevice();
+    return caregiver;
+  }
+
+  Future<DoctorUser> signInDoctorWithGoogle({
+    String? phone,
+    String? specialty,
+    String? licenseNumber,
+  }) async {
+    final user = await _signInWithGoogleUser();
+    final uid = user.uid;
+    final email = (user.email ?? '').trim().toLowerCase();
+    final doc = await _firestore!.collection('users').doc(uid).get();
+    final data = doc.data();
+    if (data != null && data['role'] != null && data['role'] != 'doctor') {
+      await _auth!.signOut();
+      throw StateError('This Google account is registered for another role.');
+    }
+
+    if (data != null && data['role'] == 'doctor') {
+      final doctor = DoctorUser.fromMap({...data, 'uid': uid});
+      await registerDoctorDevice();
+      return doctor;
+    }
+
+    if (phone == null ||
+        phone.trim().isEmpty ||
+        specialty == null ||
+        specialty.trim().isEmpty) {
+      await _auth!.signOut();
+      throw StateError('Complete doctor signup before using Google login.');
+    }
+
+    final doctor = DoctorUser(
+      uid: uid,
+      name: _displayNameForGoogleUser(user),
+      email: email,
+      phone: phone.trim(),
+      specialty: specialty.trim(),
+      licenseNumber:
+          licenseNumber?.trim().isEmpty == true ? null : licenseNumber?.trim(),
+    );
+    await _firestore!.collection('users').doc(uid).set({
+      ...doctor.toMap(),
+      'role': 'doctor',
+      'phoneNormalized': normalizePhone(doctor.phone),
+      'authProvider': 'google',
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastSeen': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _writeDoctorDirectory(doctor);
+    await registerDoctorDevice();
+    return doctor;
+  }
+
+  Future<User> _signInWithGoogleUser() async {
+    if (!_enabled || _auth == null || _firestore == null) {
+      throw StateError('Firebase is not initialized.');
+    }
+    final googleUser = await GoogleSignIn(scopes: const ['email']).signIn();
+    if (googleUser == null) {
+      throw StateError('Google sign-in was cancelled.');
+    }
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+    final userCredential = await _auth!.signInWithCredential(credential);
+    final user = userCredential.user;
+    if (user == null) {
+      throw StateError('Google sign-in failed.');
+    }
+    return user;
+  }
+
+  String _displayNameForGoogleUser(User user) {
+    final name = user.displayName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    final email = user.email ?? '';
+    final localPart = email.split('@').first.trim();
+    return localPart.isEmpty ? 'MED360 User' : localPart;
   }
 
   Future<CaregiverUser> registerCaregiver({
@@ -392,6 +598,12 @@ class FirebaseBackendService {
       email: normalizedEmail,
       phone: phone.trim(),
     );
+    await _writeRoleLoginDirectory(
+      role: 'caregiver',
+      uid: uid,
+      email: normalizedEmail,
+      phone: phone,
+    );
     await registerCaregiverDevice();
     return CaregiverUser(
       uid: uid,
@@ -408,8 +620,13 @@ class FirebaseBackendService {
     if (!_enabled || _auth == null || _firestore == null) {
       throw StateError('Firebase is not initialized.');
     }
+    final resolvedEmail = await _resolveRoleEmailForLogin(
+      role: 'caregiver',
+      identifier: email,
+      directoryCollection: 'caregiverDirectory',
+    );
     final credential = await _auth!.signInWithEmailAndPassword(
-      email: email.trim().toLowerCase(),
+      email: resolvedEmail,
       password: password,
     );
     final uid = credential.user!.uid;
@@ -422,11 +639,17 @@ class FirebaseBackendService {
     await _writeCaregiverDirectory(
       uid: uid,
       name: data['name'] ?? '',
-      email: data['email'] ?? email.trim().toLowerCase(),
+      email: data['email'] ?? resolvedEmail,
+      phone: data['phone'] ?? '',
+    );
+    await _writeRoleLoginDirectory(
+      role: 'caregiver',
+      uid: uid,
+      email: data['email'] ?? resolvedEmail,
       phone: data['phone'] ?? '',
     );
     await registerCaregiverDevice();
-    return CaregiverUser.fromMap(data);
+    return CaregiverUser.fromMap({...data, 'uid': uid});
   }
 
   Future<DoctorUser> registerDoctor({
@@ -468,6 +691,12 @@ class FirebaseBackendService {
     } catch (e) {
       debugPrint('Doctor directory write skipped after signup: $e');
     }
+    await _writeRoleLoginDirectory(
+      role: 'doctor',
+      uid: uid,
+      email: normalizedEmail,
+      phone: phone,
+    );
     await registerDoctorDevice();
     return doctor;
   }
@@ -479,8 +708,13 @@ class FirebaseBackendService {
     if (!_enabled || _auth == null || _firestore == null) {
       throw StateError('Firebase is not initialized.');
     }
+    final resolvedEmail = await _resolveRoleEmailForLogin(
+      role: 'doctor',
+      identifier: email,
+      directoryCollection: 'doctorDirectory',
+    );
     final credential = await _auth!.signInWithEmailAndPassword(
-      email: email.trim().toLowerCase(),
+      email: resolvedEmail,
       password: password,
     );
     final uid = credential.user!.uid;
@@ -496,6 +730,12 @@ class FirebaseBackendService {
     } catch (e) {
       debugPrint('Doctor directory refresh skipped: $e');
     }
+    await _writeRoleLoginDirectory(
+      role: 'doctor',
+      uid: uid,
+      email: doctor.email,
+      phone: doctor.phone,
+    );
     await registerDoctorDevice();
     return doctor;
   }
@@ -528,9 +768,103 @@ class FirebaseBackendService {
     }, SetOptions(merge: true));
   }
 
+  String _roleLoginDirectoryId(String role, String normalizedPhone) =>
+      '${role}_$normalizedPhone';
+
+  Future<void> _writeRoleLoginDirectory({
+    required String role,
+    required String uid,
+    required String email,
+    required String phone,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    final normalizedPhone = normalizePhone(phone);
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedPhone.isEmpty || normalizedEmail.isEmpty) return;
+    await _firestore!
+        .collection('roleLoginDirectory')
+        .doc(_roleLoginDirectoryId(role, normalizedPhone))
+        .set({
+      'role': role,
+      'ownerUid': uid,
+      'authEmail': normalizedEmail,
+      'phoneNormalized': normalizedPhone,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<String> _resolveRoleEmailForLogin({
+    required String role,
+    required String identifier,
+    required String directoryCollection,
+  }) async {
+    final trimmed = identifier.trim();
+    if (trimmed.contains('@')) return trimmed.toLowerCase();
+
+    final normalizedPhone = normalizePhone(trimmed);
+    if (normalizedPhone.isEmpty) {
+      throw StateError('Enter an email address or phone number.');
+    }
+
+    final loginDoc = await _firestore!
+        .collection('roleLoginDirectory')
+        .doc(_roleLoginDirectoryId(role, normalizedPhone))
+        .get();
+    final loginData = loginDoc.data();
+    final loginEmail =
+        '${loginData == null ? '' : loginData['authEmail'] ?? ''}'
+            .trim()
+            .toLowerCase();
+    if (loginData != null &&
+        loginData['role'] == role &&
+        loginEmail.isNotEmpty) {
+      return loginEmail;
+    }
+
+    try {
+      final directorySnap = await _firestore!
+          .collection(directoryCollection)
+          .where('phoneNormalized', isEqualTo: normalizedPhone)
+          .limit(5)
+          .get();
+      for (final doc in directorySnap.docs) {
+        final data = doc.data();
+        final email = '${data['email'] ?? ''}'.trim().toLowerCase();
+        if ((data['role'] == null || data['role'] == role) &&
+            email.isNotEmpty) {
+          return email;
+        }
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+    }
+
+    try {
+      final usersSnap = await _firestore!
+          .collection('users')
+          .where('role', isEqualTo: role)
+          .where('phoneNormalized', isEqualTo: normalizedPhone)
+          .limit(5)
+          .get();
+      for (final doc in usersSnap.docs) {
+        final email = '${doc.data()['email'] ?? ''}'.trim().toLowerCase();
+        if (email.isNotEmpty) return email;
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+    }
+
+    throw StateError('No $role account was found for this phone number.');
+  }
+
   Future<void> logoutFirebaseUser() async {
     await _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = null;
+    try {
+      await GoogleSignIn().signOut();
+    } catch (e) {
+      debugPrint('Google sign-out skipped: $e');
+    }
     await _auth?.signOut();
   }
 
@@ -639,7 +973,7 @@ class FirebaseBackendService {
       email: data['email'],
       phone: data['phone'] ?? '',
       relationship: 'Caregiver',
-      permission: NotificationPermission.missedDoseOnly,
+      permission: NotificationPermission.all,
     );
   }
 
@@ -679,7 +1013,7 @@ class FirebaseBackendService {
       email: data['email'],
       phone: data['phone'] ?? phone.trim(),
       relationship: 'Caregiver',
-      permission: NotificationPermission.missedDoseOnly,
+      permission: NotificationPermission.all,
     );
   }
 
@@ -783,6 +1117,10 @@ class FirebaseBackendService {
   }
 
   Future<bool> linkPatientToCurrentDoctorByPhone(String phone) async {
+    return linkPatientToCurrentDoctor(phone);
+  }
+
+  Future<bool> linkPatientToCurrentDoctor(String identifier) async {
     final doctorUid = currentUid;
     if (!_enabled || _firestore == null || doctorUid == null) return false;
     final doctorDoc =
@@ -792,48 +1130,10 @@ class FirebaseBackendService {
       throw StateError('Current account is not registered as a doctor.');
     }
 
-    final normalizedPhone = normalizePhone(phone);
-    final patientSnap = await _firestore!
-        .collection('patientDirectory')
-        .where('phoneNormalized', isEqualTo: normalizedPhone)
-        .limit(1)
-        .get();
-    String? patientUid;
-    String? patientId;
-    Map<String, dynamic>? patientData;
-    if (patientSnap.docs.isNotEmpty) {
-      final patientDoc = patientSnap.docs.first;
-      patientData = patientDoc.data();
-      patientUid = patientData['patientUid'] ?? patientDoc.id;
-      patientId = patientData['patientId'] as String?;
-    } else {
-      final usersSnap = await _firestore!
-          .collection('users')
-          .where('role', isEqualTo: 'patient')
-          .where('phoneNormalized', isEqualTo: normalizedPhone)
-          .limit(1)
-          .get();
-      if (usersSnap.docs.isEmpty) return false;
-      final userDoc = usersSnap.docs.first;
-      patientData = userDoc.data();
-      patientUid = userDoc.id;
-      patientId = patientData['patientId'] as String?;
-      if (patientId != null) {
-        try {
-          await _firestore!.collection('patientDirectory').doc(patientUid).set({
-            'patientUid': patientUid,
-            'patientId': patientId,
-            'name': patientData['name'] ?? 'Patient',
-            'phone': patientData['phone'] ?? phone.trim(),
-            'phoneNormalized': normalizedPhone,
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } catch (e) {
-          debugPrint('Patient directory backfill skipped: $e');
-        }
-      }
-    }
-    if (patientUid == null || patientId == null) return false;
+    final resolved = await _findPatientForLink(identifier);
+    if (resolved == null) return false;
+    final patientUid = resolved.patientUid;
+    final patientId = resolved.patientId;
 
     final doctor = DoctorUser.fromMap({...doctorData, 'uid': doctorUid});
     final doctorRef = _firestore!
@@ -954,6 +1254,12 @@ class FirebaseBackendService {
   Future<bool> linkExistingPatientToCurrentCaregiverByPhone(
     String phone,
   ) async {
+    return linkExistingPatientToCurrentCaregiver(phone);
+  }
+
+  Future<bool> linkExistingPatientToCurrentCaregiver(
+    String identifier,
+  ) async {
     final caregiverUid = currentUid;
     if (!_enabled || _firestore == null || caregiverUid == null) return false;
     final caregiverDoc =
@@ -962,25 +1268,81 @@ class FirebaseBackendService {
     if (caregiverData == null || caregiverData['role'] != 'caregiver') {
       throw StateError('Current account is not registered as a caregiver.');
     }
-    final normalizedPhone = normalizePhone(phone);
-    final users = await _firestore!
-        .collection('users')
-        .where('role', isEqualTo: 'patient')
-        .where('phoneNormalized', isEqualTo: normalizedPhone)
-        .limit(1)
-        .get();
-    if (users.docs.isEmpty) return false;
-    final userDoc = users.docs.first;
-    final patientUid = userDoc.id;
-    final patientId = userDoc.data()['patientId'] as String?;
-    if (patientId == null) return false;
+    final resolved = await _findPatientForLink(identifier);
+    if (resolved == null) return false;
     await _writeCaregiverPatientRelationship(
-      patientUid: patientUid,
-      patientId: patientId,
+      patientUid: resolved.patientUid,
+      patientId: resolved.patientId,
       caregiverUid: caregiverUid,
       caregiverData: caregiverData,
     );
     return true;
+  }
+
+  Future<_LinkedPatient?> _findPatientForLink(String identifier) async {
+    if (!_enabled || _firestore == null) return null;
+    final raw = identifier.trim();
+    if (raw.isEmpty) return null;
+    final emailLower = raw.toLowerCase();
+    final normalizedPhone = normalizePhone(raw);
+
+    Future<_LinkedPatient?> fromDirectory(
+      String field,
+      String value,
+    ) async {
+      if (value.isEmpty) return null;
+      final snap = await _firestore!
+          .collection('patientDirectory')
+          .where(field, isEqualTo: value)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return null;
+      final doc = snap.docs.first;
+      final data = doc.data();
+      final patientUid = '${data['patientUid'] ?? doc.id}';
+      final patientId = data['patientId'] as String?;
+      if (patientUid.isEmpty || patientId == null) return null;
+      return _LinkedPatient(
+        patientUid: patientUid,
+        patientId: patientId,
+      );
+    }
+
+    Future<_LinkedPatient?> fromUsers(String field, String value) async {
+      if (value.isEmpty) return null;
+      final users = await _firestore!
+          .collection('users')
+          .where('role', isEqualTo: 'patient')
+          .where(field, isEqualTo: value)
+          .limit(1)
+          .get();
+      if (users.docs.isEmpty) return null;
+      final doc = users.docs.first;
+      final data = doc.data();
+      final patientId = data['patientId'] as String?;
+      if (patientId == null) return null;
+      try {
+        await _firestore!.collection('patientDirectory').doc(doc.id).set({
+          'patientUid': doc.id,
+          'patientId': patientId,
+          'name': data['name'] ?? 'Patient',
+          'email': data['email'],
+          'emailLower': (data['email'] ?? '').toString().toLowerCase(),
+          'phone': data['phone'] ?? '',
+          'phoneNormalized': data['phoneNormalized'] ?? normalizedPhone,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Patient directory backfill skipped: $e');
+      }
+      return _LinkedPatient(patientUid: doc.id, patientId: patientId);
+    }
+
+    return await fromDirectory('emailLower', emailLower) ??
+        await fromDirectory('phoneNormalized', normalizedPhone) ??
+        await fromUsers('emailLower', emailLower) ??
+        await fromUsers('email', emailLower) ??
+        await fromUsers('phoneNormalized', normalizedPhone);
   }
 
   Future<void> _writeManagedPatientDocs({
@@ -1004,6 +1366,7 @@ class FirebaseBackendService {
           'patientId': patient.id,
           'name': patient.name,
           'email': email,
+          'emailLower': email.toLowerCase(),
           'phone': patient.phone,
           'phoneNormalized': normalizePhone(patient.phone),
           'createdByCaregiverUid': caregiverUid,
@@ -1018,6 +1381,7 @@ class FirebaseBackendService {
           'ownerUid': patientUid,
           'name': patient.name,
           'email': email,
+          'emailLower': email.toLowerCase(),
           'phone': patient.phone,
           'phoneNormalized': normalizePhone(patient.phone),
           'chronicCondition': patient.chronicCondition,
@@ -1036,6 +1400,8 @@ class FirebaseBackendService {
           'patientUid': patientUid,
           'patientId': patient.id,
           'name': patient.name,
+          'email': email,
+          'emailLower': email.toLowerCase(),
           'phone': patient.phone,
           'phoneNormalized': normalizePhone(patient.phone),
           'createdByCaregiverUid': caregiverUid,
@@ -1090,7 +1456,7 @@ class FirebaseBackendService {
         'email': caregiverData['email'],
         'phone': caregiverData['phone'] ?? '',
         'relationship': 'مرافق',
-        'permission': NotificationPermission.missedDoseOnly.name,
+        'permission': NotificationPermission.all.name,
         'updatedAt': FieldValue.serverTimestamp(),
       },
       SetOptions(merge: true),
@@ -1181,12 +1547,16 @@ class FirebaseBackendService {
 
   Future<void> _writePatientDirectory(String uid, PatientUser patient) async {
     if (!_enabled || _firestore == null) return;
+    final patientEmail =
+        patient.phone.contains('@') ? patient.phone.trim().toLowerCase() : null;
     await _firestore!.collection('patientDirectory').doc(uid).set({
       'patientUid': uid,
       'patientId': patient.id,
       'name': patient.name,
       'phone': patient.phone,
       'phoneNormalized': normalizePhone(patient.phone),
+      if (patientEmail != null) 'email': patientEmail,
+      if (patientEmail != null) 'emailLower': patientEmail,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -1368,6 +1738,60 @@ class FirebaseBackendService {
         .delete();
   }
 
+  Future<void> unlinkCurrentCaregiverFromPatient({
+    required String patientUid,
+  }) async {
+    final caregiverUid = currentUid;
+    if (!_enabled ||
+        _firestore == null ||
+        caregiverUid == null ||
+        patientUid.isEmpty) {
+      return;
+    }
+
+    final batch = _firestore!.batch();
+    batch.delete(
+      _firestore!
+          .collection('patients')
+          .doc(patientUid)
+          .collection('caregivers')
+          .doc(caregiverUid),
+    );
+    batch.delete(
+      _firestore!
+          .collection('patientCaregivers')
+          .doc('${patientUid}_$caregiverUid'),
+    );
+    await batch.commit();
+  }
+
+  Future<void> unlinkCurrentDoctorFromPatient({
+    required String patientUid,
+  }) async {
+    final doctorUid = currentUid;
+    if (!_enabled ||
+        _firestore == null ||
+        doctorUid == null ||
+        patientUid.isEmpty) {
+      return;
+    }
+
+    final batch = _firestore!.batch();
+    batch.delete(
+      _firestore!
+          .collection('patients')
+          .doc(patientUid)
+          .collection('doctors')
+          .doc(doctorUid),
+    );
+    batch.delete(
+      _firestore!
+          .collection('patientDoctorRelations')
+          .doc('${patientUid}_$doctorUid'),
+    );
+    await batch.commit();
+  }
+
   Future<void> sendMissedDoseAlert({
     required String patientId,
     required String patientName,
@@ -1391,6 +1815,8 @@ class FirebaseBackendService {
           : '$patientName missed a scheduled medication.',
       'language': isArabic ? 'ar' : 'en',
       'type': 'missedDose',
+      'sentAt': FieldValue.serverTimestamp(),
+      'sentAtIso': notification.sentAt.toIso8601String(),
       'createdAt': FieldValue.serverTimestamp(),
       'delivered': false,
     };
@@ -1679,6 +2105,63 @@ class FirebaseBackendService {
     }
   }
 
+  Future<void> deletePatientMedication({
+    required String patientUid,
+    required String patientId,
+    required String medicationId,
+    Medication? medication,
+    required String actorRole,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    await _firestore!
+        .collection('patients')
+        .doc(patientUid)
+        .collection('medications')
+        .doc(medicationId)
+        .delete();
+
+    try {
+      await _firestore!.collection('medicationChangeLogs').add({
+        'patientId': patientId,
+        'patientUid': patientUid,
+        'medicationId': medicationId,
+        'medicationName': medication?.name ?? '',
+        'action': 'deleted',
+        'actorRole': actorRole,
+        'actorUid': currentUid,
+        'timestamp': FieldValue.serverTimestamp(),
+        if (medication != null) ...{
+          'quantityRemaining': medication.quantityRemaining,
+          'dosesPerDay': medication.dosesPerDay,
+          'refillThreshold': medication.refillThreshold,
+        },
+      });
+    } catch (e) {
+      debugPrint('Medication deletion analytics skipped: $e');
+    }
+  }
+
+  Future<void> deletePendingDosesForMedication({
+    required String patientId,
+    required String medicationId,
+  }) async {
+    if (!_enabled || _firestore == null) return;
+    final patientUid = await _patientUidForPatientId(patientId);
+    if (patientUid == null) return;
+    final snap = await _firestore!
+        .collection('patientDoses')
+        .where('ownerUid', isEqualTo: patientUid)
+        .where('patientId', isEqualTo: patientId)
+        .where('medicationId', isEqualTo: medicationId)
+        .where('status', isEqualTo: DoseStatus.pending.name)
+        .get();
+    final batch = _firestore!.batch();
+    for (final doc in snap.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
   Future<void> _queuePatientMedicationNotification({
     required String patientUid,
     required String patientId,
@@ -1805,4 +2288,14 @@ class FirebaseBackendService {
         .doc(notificationId)
         .set(payload);
   }
+}
+
+class _LinkedPatient {
+  final String patientUid;
+  final String patientId;
+
+  const _LinkedPatient({
+    required this.patientUid,
+    required this.patientId,
+  });
 }

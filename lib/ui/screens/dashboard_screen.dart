@@ -14,9 +14,20 @@ class DashboardScreen extends StatelessWidget {
     final auth = context.read<AuthProvider>();
     final strings = AppStrings(auth.arabicMode);
     final meds = context.read<MedicationProvider>();
-    await context
+    final didConfirm = await context
         .read<AdherenceProvider>()
         .confirmDoseTaken(dose.id, auth.patient!.id);
+    if (!didConfirm) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(strings.doseTooEarly),
+          backgroundColor: AppColors.amber,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     final medication = meds.findById(dose.medicationId);
     if (medication != null && medication.quantityRemaining > 0) {
@@ -34,42 +45,6 @@ class DashboardScreen extends StatelessWidget {
       SnackBar(
         content: Text(strings.doseLoggedTaken(dose.medicationName)),
         backgroundColor: AppColors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  Future<void> _missDose(BuildContext context, DoseConfirmation dose) async {
-    final auth = context.read<AuthProvider>();
-    final strings = AppStrings(auth.arabicMode);
-    final adherence = context.read<AdherenceProvider>();
-    final caregiverProvider = context.read<CaregiverProvider>();
-    final caregiverIds = await adherence.confirmDoseMissed(
-      dose.id,
-      auth.patient!.id,
-      caregivers: auth.caregivers,
-      caregiverAlertsEnabled: auth.caregiverAlertsEnabled,
-    );
-
-    if (caregiverIds.isNotEmpty) {
-      await caregiverProvider.dispatchMissedDoseAlert(
-        patientId: auth.patient!.id,
-        caregiverIds: caregiverIds,
-        allCaregivers: auth.caregivers,
-        doseId: dose.id,
-        medicationId: dose.medicationId,
-        medicationName: dose.medicationName,
-        missedAt: DateTime.now(),
-        patientName: auth.patient?.name ?? strings.patient,
-        isArabic: auth.arabicMode,
-      );
-    }
-
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(strings.doseLoggedMissed),
-        backgroundColor: AppColors.amber,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -142,8 +117,8 @@ class DashboardScreen extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: AppSpacing.md),
                   child: _DoseActionCard(
                     dose: dose,
+                    canTake: adherence.canConfirmDoseNow(dose),
                     onTake: () => _takeDose(context, dose),
-                    onMiss: () => _missDose(context, dose),
                   ),
                 ),
               ),
@@ -175,39 +150,43 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 58,
-          height: 58,
-          decoration: const BoxDecoration(
-            color: AppColors.tealLight,
-            borderRadius: AppRadius.lg,
+    return AppCard(
+      elevation: 0,
+      color: AppColors.surfaceMuted,
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: const BoxDecoration(
+              color: AppColors.tealLight,
+              borderRadius: AppRadius.lg,
+            ),
+            child: const Icon(
+              Icons.health_and_safety_rounded,
+              color: AppColors.tealDark,
+              size: 32,
+            ),
           ),
-          child: const Icon(
-            Icons.health_and_safety_rounded,
-            color: AppColors.tealDark,
-            size: 32,
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppStrings.of(context).greeting(name),
+                  style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  AppStrings.of(context).dashboardSubtitle,
+                  style: AppTextStyles.screenSub.copyWith(fontSize: 15),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                AppStrings.of(context).greeting(name),
-                style: AppTextStyles.screenTitle.copyWith(fontSize: 25),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                AppStrings.of(context).dashboardSubtitle,
-                style: AppTextStyles.screenSub.copyWith(fontSize: 15),
-              ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -234,12 +213,33 @@ class _TodaySummary extends StatelessWidget {
     final strings = AppStrings.of(context);
     return AppCard(
       padding: const EdgeInsets.all(20),
+      borderColor: AppColors.tealLight,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            strings.takenOfTotal(taken, total),
-            style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: const BoxDecoration(
+                  color: AppColors.mint,
+                  borderRadius: AppRadius.md,
+                ),
+                child: const Icon(
+                  Icons.task_alt_rounded,
+                  color: AppColors.tealDark,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  strings.takenOfTotal(taken, total),
+                  style: AppTextStyles.screenTitle.copyWith(fontSize: 24),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
           ClipRRect(
@@ -247,7 +247,7 @@ class _TodaySummary extends StatelessWidget {
             child: LinearProgressIndicator(
               minHeight: 16,
               value: progress.clamp(0, 1),
-              backgroundColor: AppColors.grayLight,
+              backgroundColor: AppColors.border,
               valueColor: const AlwaysStoppedAnimation(AppColors.teal),
             ),
           ),
@@ -282,9 +282,10 @@ class _TodaySummary extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: AppColors.skyLight,
               borderRadius: AppRadius.md,
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
@@ -342,11 +343,17 @@ class _SummaryNumber extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: AppRadius.md,
+        border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTextStyles.medDetail.copyWith(fontSize: 13)),
+          Text(
+            label,
+            style: AppTextStyles.medDetail.copyWith(fontSize: 13),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 4),
           Text(
             value,
@@ -354,6 +361,8 @@ class _SummaryNumber extends StatelessWidget {
               color: color,
               fontSize: 22,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -363,13 +372,13 @@ class _SummaryNumber extends StatelessWidget {
 
 class _DoseActionCard extends StatelessWidget {
   final DoseConfirmation dose;
+  final bool canTake;
   final VoidCallback onTake;
-  final VoidCallback onMiss;
 
   const _DoseActionCard({
     required this.dose,
+    required this.canTake,
     required this.onTake,
-    required this.onMiss,
   });
 
   @override
@@ -377,6 +386,7 @@ class _DoseActionCard extends StatelessWidget {
     final strings = AppStrings.of(context);
     return AppCard(
       padding: const EdgeInsets.all(18),
+      borderColor: AppColors.border,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -391,11 +401,14 @@ class _DoseActionCard extends StatelessWidget {
                     Text(
                       dose.medicationName,
                       style: AppTextStyles.screenTitle.copyWith(fontSize: 23),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      strings.doseTimeValue(dose.scheduledTime),
-                      style: AppTextStyles.medDetail.copyWith(fontSize: 15),
+                    AppBadge(
+                      label: strings.doseTimeValue(dose.scheduledTime),
+                      variant: BadgeVariant.blue,
+                      icon: Icons.schedule_rounded,
                     ),
                   ],
                 ),
@@ -403,49 +416,35 @@ class _DoseActionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onTake,
-                  icon: const Icon(Icons.check_rounded, size: 24),
-                  label: Text(strings.tookIt),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.teal,
-                    foregroundColor: AppColors.white,
-                    minimumSize: const Size.fromHeight(56),
-                    textStyle: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: AppRadius.md,
-                    ),
-                  ),
-                ),
+          FilledButton.icon(
+            onPressed: canTake ? onTake : null,
+            icon: const Icon(Icons.check_rounded, size: 24),
+            label: Text(canTake ? strings.tookIt : strings.availableSoon),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.teal,
+              foregroundColor: AppColors.white,
+              disabledBackgroundColor: AppColors.grayLight,
+              disabledForegroundColor: AppColors.grayMid,
+              minimumSize: const Size.fromHeight(58),
+              textStyle: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
               ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onMiss,
-                  icon: const Icon(Icons.close_rounded, size: 24),
-                  label: Text(strings.missed),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.red,
-                    side: const BorderSide(color: AppColors.red, width: 1.4),
-                    minimumSize: const Size.fromHeight(56),
-                    textStyle: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: AppRadius.md,
-                    ),
-                  ),
-                ),
+              shape: const RoundedRectangleBorder(
+                borderRadius: AppRadius.md,
               ),
-            ],
+            ),
           ),
+          if (!canTake) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              strings.doseTooEarly,
+              style: AppTextStyles.medDetail.copyWith(
+                color: AppColors.amber,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -65,8 +65,8 @@ class AppStrings {
   String get enterPatientPhone =>
       pick('أدخل رقم هاتف المريض', 'Enter the patient phone number');
   String get linkPatientHint => pick(
-        'أدخل رقم هاتف المريض كما هو مسجل في حسابه.',
-        'Enter the patient phone number exactly as registered on the account.',
+        'أدخل بريد المريض أو رقم هاتفه كما هو مسجل في حسابه.',
+        'Enter the patient email or phone exactly as registered on the account.',
       );
   String get addMedication => pick('إضافة دواء', 'Add medication');
   String get noMedications => pick('لا توجد أدوية', 'No medications');
@@ -91,6 +91,11 @@ class AppStrings {
       pick('انتهيت من جرعات اليوم', 'You are done for today');
   String get doseTime => pick('وقت الجرعة', 'Dose time');
   String get tookIt => pick('أخذتها', 'Took it');
+  String get availableSoon => pick('قريباً', 'Available soon');
+  String get doseTooEarly => pick(
+        'يمكن تسجيل الجرعة قبل موعدها بـ 30 دقيقة فقط.',
+        'You can mark this dose as taken only within 30 minutes of its time.',
+      );
   String get adherenceSummary => pick('ملخص الالتزام', 'Adherence summary');
   String get adherence => pick('الالتزام', 'Adherence');
   String get medicationDetails => pick('تفاصيل الأدوية', 'Medication details');

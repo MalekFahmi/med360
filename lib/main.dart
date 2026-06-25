@@ -62,15 +62,28 @@ class Med360App extends StatelessWidget {
                 seedColor: AppColors.teal,
                 primary: AppColors.teal,
                 secondary: AppColors.sky,
-                surface: AppColors.white,
+                surface: AppColors.surface,
+                surfaceContainerHighest: AppColors.surfaceMuted,
+                outline: AppColors.border,
               ),
               scaffoldBackgroundColor: AppColors.pageTint,
               fontFamily: 'Roboto',
+              textTheme: Theme.of(context).textTheme.apply(
+                    bodyColor: AppColors.grayDark,
+                    displayColor: AppColors.navy,
+                  ),
               appBarTheme: const AppBarTheme(
                 backgroundColor: AppColors.pageTint,
                 foregroundColor: AppColors.navy,
                 elevation: 0,
+                scrolledUnderElevation: 0,
                 centerTitle: false,
+                titleTextStyle: TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
               ),
               filledButtonTheme: FilledButtonThemeData(
                 style: FilledButton.styleFrom(
@@ -86,8 +99,19 @@ class Med360App extends StatelessWidget {
                   ),
                 ),
               ),
+              textButtonTheme: TextButtonThemeData(
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.tealDark,
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
               outlinedButtonTheme: OutlinedButtonThemeData(
                 style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.tealDark,
+                  side: const BorderSide(color: AppColors.border),
                   minimumSize: const Size(0, 52),
                   textStyle: const TextStyle(
                     fontSize: 17,
@@ -99,16 +123,75 @@ class Med360App extends StatelessWidget {
                 ),
               ),
               inputDecorationTheme: const InputDecorationTheme(
-                border: OutlineInputBorder(borderRadius: AppRadius.md),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                filled: true,
+                fillColor: AppColors.surface,
+                prefixIconColor: AppColors.grayMid,
+                suffixIconColor: AppColors.grayMid,
+                labelStyle: TextStyle(color: AppColors.grayMid),
+                floatingLabelStyle: TextStyle(
+                  color: AppColors.tealDark,
+                  fontWeight: FontWeight.w700,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: AppRadius.md,
+                  borderSide: BorderSide(color: AppColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppRadius.md,
+                  borderSide: BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppRadius.md,
+                  borderSide: BorderSide(color: AppColors.teal, width: 1.4),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: AppRadius.md,
+                  borderSide: BorderSide(color: AppColors.red),
+                ),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 16,
+                ),
               ),
               navigationBarTheme: NavigationBarThemeData(
-                backgroundColor: AppColors.white,
+                backgroundColor: AppColors.surface,
                 indicatorColor: AppColors.tealLight,
                 labelTextStyle: WidgetStateProperty.all(
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                 ),
+                iconTheme: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return IconThemeData(
+                    color: selected ? AppColors.tealDark : AppColors.grayMid,
+                    size: selected ? 28 : 26,
+                  );
+                }),
+              ),
+              floatingActionButtonTheme: const FloatingActionButtonThemeData(
+                backgroundColor: AppColors.teal,
+                foregroundColor: AppColors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(borderRadius: AppRadius.lg),
+              ),
+              snackBarTheme: const SnackBarThemeData(
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: AppRadius.md),
+                contentTextStyle: TextStyle(
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              bottomSheetTheme: const BottomSheetThemeData(
+                backgroundColor: AppColors.surface,
+                surfaceTintColor: AppColors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+                ),
+              ),
+              dividerTheme: const DividerThemeData(
+                color: AppColors.border,
+                thickness: 1,
+                space: 1,
               ),
             ),
             locale: auth.arabicMode
@@ -278,6 +361,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         for (final med in meds) {
           await NotificationService().scheduleMedicationReminders(
             med,
+            patientId: pId,
             isArabic: auth.arabicMode,
           );
         }
@@ -311,6 +395,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (parts.length < 3) return;
     final medicationId = parts[1];
     final scheduledTime = parts[2];
+    final doseId = parts.length >= 4 && parts[3].isNotEmpty ? parts[3] : null;
 
     final auth = context.read<AuthProvider>();
     final patient = auth.patient;
@@ -319,13 +404,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final medicationProvider = context.read<MedicationProvider>();
     final adherenceProvider = context.read<AdherenceProvider>();
     final medication = medicationProvider.findById(medicationId);
-    final matchingDoses = adherenceProvider.todaysDoses.where(
-      (dose) =>
-          dose.medicationId == medicationId &&
-          dose.scheduledTime == scheduledTime &&
-          dose.isPending,
-    );
-    final dose = matchingDoses.isEmpty ? null : matchingDoses.first;
+    final allPending =
+        adherenceProvider.allDoses.where((dose) => dose.isPending);
+    final matchingDoses = doseId == null
+        ? allPending.where(
+            (dose) =>
+                dose.medicationId == medicationId &&
+                dose.scheduledTime == scheduledTime,
+          )
+        : allPending.where((dose) => dose.id == doseId);
+    var dose = matchingDoses.isEmpty ? null : matchingDoses.first;
+    if (dose == null && medication != null) {
+      dose = await adherenceProvider.ensurePendingDose(
+        patientId: patient.id,
+        medication: medication,
+        scheduledTime: scheduledTime,
+      );
+    }
 
     final actionId = response.actionId;
     await FirebaseBackendService().logReminderEvent(
@@ -346,11 +441,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
     if (actionId == NotificationService.actionTakeMedication) {
       if (dose == null) return;
-      await adherenceProvider.confirmDoseTaken(
+      final didConfirm = await adherenceProvider.confirmDoseTaken(
         dose.id,
         patient.id,
         source: 'notificationAction',
       );
+      if (!didConfirm) return;
       if (medication != null && medication.quantityRemaining > 0) {
         await medicationProvider.updateMedication(
           patient.id,
@@ -364,33 +460,81 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
 
     if (actionId == NotificationService.actionSnoozeMedication) {
-      if (medication == null) return;
-      final time = ReminderTime.fromString(scheduledTime);
-      await NotificationService().snoozeAlarm(
-        med: medication,
-        time: time,
-        isArabic: auth.arabicMode,
-      );
+      if (dose != null) {
+        final snoozed = dose.copyWith(
+          scheduledDate: DateTime.now(),
+          scheduledTime: _formatNotificationActionTime(
+            DateTime.now().add(const Duration(minutes: 5)),
+          ),
+        );
+        await NotificationService().scheduleOneOffDoseReminder(
+          dose: snoozed,
+          patientId: patient.id,
+          medication: medication,
+          isArabic: auth.arabicMode,
+          stage: 'snooze',
+        );
+      } else if (medication != null) {
+        final time = ReminderTime.fromString(scheduledTime);
+        await NotificationService().snoozeAlarm(
+          med: medication,
+          patientId: patient.id,
+          time: time,
+          isArabic: auth.arabicMode,
+        );
+      } else {
+        return;
+      }
       await FirebaseBackendService().logReminderEvent(
         patientId: patient.id,
-        medicationId: medication.id,
+        medicationId: medicationId,
         eventType: 'snoozedReminder',
         source: 'notification',
-        details: {'scheduledTime': scheduledTime, 'snoozeMinutes': 5},
+        details: {
+          'scheduledTime': scheduledTime,
+          'doseId': dose?.id,
+          'snoozeMinutes': 5,
+        },
       );
       return;
     }
 
-    if (actionId == NotificationService.actionDismissMedication) {
+    if (actionId == NotificationService.actionRescheduleMedication) {
+      if (dose == null) return;
+      final scheduledFor = DateTime.now().add(const Duration(minutes: 30));
+      final updated = await adherenceProvider.rescheduleDose(
+        dose.id,
+        patient.id,
+        scheduledFor,
+        source: 'notificationAction',
+        isArabic: auth.arabicMode,
+      );
+      if (updated == null) return;
+      await NotificationService().scheduleOneOffDoseReminder(
+        dose: updated,
+        patientId: patient.id,
+        medication: medication,
+        isArabic: auth.arabicMode,
+        stage: 'rescheduled',
+      );
       await FirebaseBackendService().logReminderEvent(
         patientId: patient.id,
         medicationId: medicationId,
-        eventType: 'alarmDismissed',
-        source: 'notificationAction',
-        details: {'scheduledTime': scheduledTime, 'doseId': dose?.id},
+        eventType: 'rescheduledReminder',
+        source: 'notification',
+        details: {
+          'oldScheduledTime': scheduledTime,
+          'newScheduledTime': updated.scheduledTime,
+          'doseId': updated.id,
+          'rescheduleMinutes': 30,
+        },
       );
+      return;
     }
   }
+
+  String _formatNotificationActionTime(DateTime dateTime) =>
+      '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
 
   void _rebuildReportsAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -468,42 +612,56 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final strings = AppStrings(isAr);
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _screens),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: AppColors.white,
-        indicatorColor: AppColors.skyLight,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (i) {
-          setState(() => _currentIndex = i);
-          if (i == 2) _rebuildReportsAfterFrame();
-        },
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.home_outlined),
-            selectedIcon: const Icon(Icons.home_rounded),
-            label: strings.home,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.medication_outlined),
-            selectedIcon: const Icon(Icons.medication_rounded),
-            label: strings.medications,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.bar_chart_outlined),
-            selectedIcon: const Icon(Icons.bar_chart_rounded),
-            label: strings.reports,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.people_outline),
-            selectedIcon: const Icon(Icons.people_rounded),
-            label: strings.care,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.settings_outlined),
-            selectedIcon: const Icon(Icons.settings_rounded),
-            label: strings.settings,
-          ),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.border)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.shadow,
+              blurRadius: 16,
+              offset: Offset(0, -4),
+            ),
+          ],
+        ),
+        child: NavigationBar(
+          height: 72,
+          backgroundColor: AppColors.surface,
+          indicatorColor: AppColors.tealLight,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (i) {
+            setState(() => _currentIndex = i);
+            if (i == 2) _rebuildReportsAfterFrame();
+          },
+          destinations: [
+            NavigationDestination(
+              icon: const Icon(Icons.home_outlined),
+              selectedIcon: const Icon(Icons.home_rounded),
+              label: strings.home,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.medication_outlined),
+              selectedIcon: const Icon(Icons.medication_rounded),
+              label: strings.medications,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.bar_chart_outlined),
+              selectedIcon: const Icon(Icons.bar_chart_rounded),
+              label: strings.reports,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.people_outline),
+              selectedIcon: const Icon(Icons.people_rounded),
+              label: strings.care,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.settings_outlined),
+              selectedIcon: const Icon(Icons.settings_rounded),
+              label: strings.settings,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -29,7 +29,7 @@ class EscalationService {
   EscalationService._internal();
 
   static const secondReminderDelay = Duration(minutes: 5);
-  static const autoMissDelay = Duration(minutes: 5);
+  static const autoMissDelay = Duration(minutes: 10);
   static const _periodicTaskName = 'med360-escalation-periodic';
   static const _oneOffPrefix = 'med360-escalation-dose';
 
@@ -159,6 +159,7 @@ class EscalationService {
       await db.insertDose(patient.id, dose);
       await NotificationService().scheduleDoseEscalation(
         dose,
+        patientId: patient.id,
         isArabic: patient.arabicMode,
       );
       await scheduleDoseAutoMiss(dose);

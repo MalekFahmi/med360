@@ -62,6 +62,11 @@ class CaregiverProvider extends ChangeNotifier {
     if (_caregiverUid != null) await loadSharedReports(_caregiverUid!);
   }
 
+  Future<void> restoreReport(String reportId) async {
+    await FirebaseBackendService().reports.restore(reportId);
+    if (_caregiverUid != null) await loadSharedReports(_caregiverUid!);
+  }
+
   Future<bool> createManagedPatient({
     required String name,
     required String email,
@@ -84,10 +89,10 @@ class CaregiverProvider extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> linkExistingPatientByPhone(String phone) async {
+  Future<bool> linkExistingPatient(String identifier) async {
     final ok = await FirebaseBackendService()
         .careTeam
-        .linkExistingPatientToCurrentCaregiverByPhone(phone);
+        .linkExistingPatientToCurrentCaregiver(identifier);
     if (_caregiverUid != null) listenToLinkedPatients(_caregiverUid!);
     return ok;
   }
@@ -162,6 +167,8 @@ class CaregiverProvider extends ChangeNotifier {
             'patientUid': patientUid,
             'name': patientData['name'] ?? patientId,
             'phone': patientData['phone'] ?? '',
+            'permission':
+                doc.data()['permission'] ?? NotificationPermission.all.name,
             'adherenceRate': adherenceRate,
             'missedCount': missedCount,
             'refillRisk': refillRisk,
@@ -176,6 +183,52 @@ class CaregiverProvider extends ChangeNotifier {
     }, onError: (Object e) {
       debugPrint('Linked patient stream failed: $e');
     });
+  }
+
+  Future<void> updateLinkedPatientPermission({
+    required String patientUid,
+    required String patientId,
+    required NotificationPermission permission,
+  }) async {
+    final caregiverUid = _caregiverUid;
+    if (caregiverUid == null || patientUid.isEmpty) return;
+    final firestore = FirebaseFirestore.instance;
+    final updates = {
+      'permission': permission.name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    await Future.wait([
+      firestore
+          .collection('patientCaregivers')
+          .doc('${patientUid}_$caregiverUid')
+          .set(updates, SetOptions(merge: true)),
+      firestore
+          .collection('patients')
+          .doc(patientUid)
+          .collection('caregivers')
+          .doc(caregiverUid)
+          .set(updates, SetOptions(merge: true)),
+    ]);
+    _linkedPatients = _linkedPatients.map((patient) {
+      final samePatient = patient['patientUid'] == patientUid ||
+          patient['patientId'] == patientId;
+      return samePatient
+          ? {...patient, 'permission': permission.name}
+          : patient;
+    }).toList();
+    notifyListeners();
+  }
+
+  Future<void> unlinkPatient(Map<String, dynamic> patient) async {
+    final patientUid = '${patient['patientUid'] ?? ''}';
+    if (patientUid.isEmpty) return;
+    await FirebaseBackendService()
+        .careTeam
+        .unlinkCurrentCaregiverFromPatient(patientUid: patientUid);
+    _linkedPatients = _linkedPatients
+        .where((item) => '${item['patientUid'] ?? ''}' != patientUid)
+        .toList();
+    notifyListeners();
   }
 
   void listenToInboundAlerts(String caregiverUid) {
@@ -212,6 +265,7 @@ class CaregiverProvider extends ChangeNotifier {
       missedAt:
           data['missedAt'] != null ? DateTime.parse(data['missedAt']) : null,
       sentAt: _readDate(data['sentAt']) ??
+          _readDate(data['sentAtIso']) ??
           _readDate(data['createdAt']) ??
           DateTime.now(),
       channel: NotificationChannel.inApp,
@@ -259,7 +313,6 @@ class CaregiverProvider extends ChangeNotifier {
           sentAt: DateTime.now(),
           channel: NotificationChannel.both,
         );
-        await _db.insertCaregiverNotification(patientId, notif);
         await FirebaseBackendService().notifications.sendMissedDoseAlert(
               patientId: patientId,
               patientName: patientName,
@@ -267,6 +320,7 @@ class CaregiverProvider extends ChangeNotifier {
               notification: notif,
               isArabic: isArabic,
             );
+        await _db.insertCaregiverNotification(patientId, notif);
         await FirebaseBackendService().analytics.logAdherenceEvent(
           patientId: patientId,
           medicationId: medicationId,
@@ -280,7 +334,9 @@ class CaregiverProvider extends ChangeNotifier {
           },
         );
         _notifications = [notif, ..._notifications];
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Caregiver missed-dose notification failed: $e');
+      }
     }
     notifyListeners();
   }

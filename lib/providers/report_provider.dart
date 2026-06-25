@@ -126,24 +126,12 @@ class ReportProvider extends ChangeNotifier {
     if (report == null) return null;
     final medications = (report['medications'] as List<dynamic>? ?? const []);
 
-    final lines = <String>[
-      'Med360 Adherence Report',
-      'Patient: $patientName',
-      'Type: ${_titleCase(reportType)}',
-      'Period: ${report['label']}',
-      'Overall adherence: ${((report['adherenceRate'] ?? 0.0) * 100).round()}%',
-      'Taken doses: ${report['takenDoses']}',
-      'Missed doses: ${report['missedDoses']}',
-      'Pending doses: ${report['pendingDoses']}',
-      '',
-      'Medication breakdown',
-      for (final item in medications)
-        '${item['medicationName']}: ${(((item['adherenceRate'] ?? 0.0) as num) * 100).round()}% '
-            '(${item['takenDoses']} taken, ${item['missedDoses']} missed, '
-            '${item['pendingDoses']} pending)',
-    ];
-
-    return _buildSimplePdf(lines);
+    return _buildReportPdf(
+      report: report,
+      medications: medications,
+      patientName: patientName,
+      reportType: reportType,
+    );
   }
 
   Map<String, dynamic>? _reportPayload(String reportType) {
@@ -159,7 +147,7 @@ class ReportProvider extends ChangeNotifier {
       'weekly' => _rangeReport(
           reportType: 'weekly',
           label:
-              'Week of ${_weekStart(now).month}/${_weekStart(now).day}/${_weekStart(now).year}',
+              'Week ${_formatDate(_weekStart(now))} - ${_formatDate(_weekStart(now).add(const Duration(days: 6)))}',
           start: _weekStart(now),
           end: _weekStart(now).add(
               const Duration(days: 6, hours: 23, minutes: 59, seconds: 59)),
@@ -174,6 +162,9 @@ class ReportProvider extends ChangeNotifier {
     return {
       'year': report.year,
       'month': report.month,
+      'start': DateTime(report.year, report.month).toIso8601String(),
+      'end': DateTime(report.year, report.month + 1, 0, 23, 59, 59)
+          .toIso8601String(),
       'label': report.monthLabel,
       'takenDoses': report.takenDoses,
       'missedDoses': report.missedDoses,
@@ -184,6 +175,7 @@ class ReportProvider extends ChangeNotifier {
       'adherenceRate': report.overallAdherenceRate,
       'medications': report.perMedication
           .map((record) => {
+                ..._medicationDetails(record.medicationId),
                 'medicationId': record.medicationId,
                 'medicationName': record.medicationName,
                 'totalDoses': record.totalDoses,
@@ -218,10 +210,13 @@ class ReportProvider extends ChangeNotifier {
         final medicationName = matchingMedication.isEmpty
             ? medicationDoses.first.medicationName
             : matchingMedication.first.displayName;
+        final medication =
+            matchingMedication.isEmpty ? null : matchingMedication.first;
         final taken = medicationDoses.where((dose) => dose.isTaken).length;
         final missed = medicationDoses.where((dose) => dose.isMissed).length;
         final resolved = taken + missed;
         return {
+          ..._medicationDetails(medicationId, medication: medication),
           'medicationId': medicationId,
           'medicationName': medicationName,
           'totalDoses': medicationDoses.length,
@@ -230,6 +225,9 @@ class ReportProvider extends ChangeNotifier {
           'pendingDoses':
               medicationDoses.where((dose) => dose.isPending).length,
           'adherenceRate': resolved == 0 ? 0.0 : taken / resolved,
+          'scheduledTimes':
+              medicationDoses.map((dose) => dose.scheduledTime).toSet().toList()
+                ..sort(),
         };
       },
     ).toList();
@@ -259,10 +257,40 @@ class ReportProvider extends ChangeNotifier {
     };
   }
 
+  Map<String, dynamic> _medicationDetails(
+    String medicationId, {
+    Medication? medication,
+  }) {
+    if (medication == null) {
+      for (final candidate in _medications) {
+        if (candidate.id == medicationId) {
+          medication = candidate;
+          break;
+        }
+      }
+    }
+    if (medication == null) return const {};
+    return {
+      'dosage': medication.dosage,
+      'form': medication.form.name,
+      'reminderTimes':
+          medication.reminderTimes.map((time) => time.display).toList(),
+      'dosesPerDay': medication.dosesPerDay,
+      'quantityRemaining': medication.quantityRemaining,
+      if ((medication.notes ?? '').trim().isNotEmpty)
+        'notes': medication.notes!.trim(),
+      if ((medication.notesAr ?? '').trim().isNotEmpty)
+        'notesAr': medication.notesAr!.trim(),
+    };
+  }
+
   DateTime _weekStart(DateTime date) {
     final day = DateTime(date.year, date.month, date.day);
     return day.subtract(Duration(days: day.weekday - 1));
   }
+
+  String _formatDate(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
   String _titleCase(String value) =>
       value.isEmpty ? value : '${value[0].toUpperCase()}${value.substring(1)}';
@@ -274,35 +302,174 @@ class ReportProvider extends ChangeNotifier {
         .toList();
   }
 
-  Uint8List _buildSimplePdf(List<String> lines) {
-    final content = StringBuffer()
-      ..writeln('BT')
-      ..writeln('/F1 18 Tf')
-      ..writeln('72 740 Td');
+  Uint8List _buildReportPdf({
+    required Map<String, dynamic> report,
+    required List<dynamic> medications,
+    required String patientName,
+    required String reportType,
+  }) {
+    final adherence = (((report['adherenceRate'] ?? 0.0) as num) * 100).round();
+    final medRows = medications.whereType<Map>().toList();
+    final pages = <String>[];
+    var index = 0;
 
-    for (var i = 0; i < lines.length; i++) {
-      final size = i == 0 ? 18 : 11;
-      if (i > 0) content.writeln('0 -18 Td');
-      content
-        ..writeln('/F1 $size Tf')
-        ..writeln('(${_escapePdfText(lines[i])}) Tj');
+    final firstPage = _newReportPage()
+      ..writeln(_pdfRect(0, 700, 612, 92, '0.000 0.478 0.620'))
+      ..writeln(
+          _pdfText('MED360', 42, 754, size: 22, color: '1 1 1', bold: true))
+      ..writeln(_pdfText('${_titleCase(reportType)} adherence report', 42, 728,
+          size: 16, color: '1 1 1'))
+      ..writeln(_pdfText('Patient: $patientName', 42, 672,
+          size: 13, color: '0.110 0.145 0.180', bold: true))
+      ..writeln(_pdfText('Period: ${report['label']}', 42, 652,
+          size: 11, color: '0.330 0.380 0.420'));
+
+    _pdfMetricCard(
+        firstPage, 42, 560, 'Adherence', '$adherence%', '0.000 0.478 0.620');
+    _pdfMetricCard(
+      firstPage,
+      202,
+      560,
+      'Taken',
+      '${report['takenDoses']}',
+      '0.070 0.560 0.350',
+    );
+    _pdfMetricCard(
+      firstPage,
+      362,
+      560,
+      'Missed',
+      '${report['missedDoses']}',
+      '0.820 0.220 0.250',
+    );
+
+    firstPage.writeln(_pdfText('Medication details', 42, 520,
+        size: 15, color: '0.110 0.145 0.180', bold: true));
+    index = _appendMedicationRows(firstPage, medRows, index, startY: 482);
+    _pdfFooter(firstPage, pageNumber: 1);
+    pages.add(firstPage.toString());
+
+    var pageNumber = 2;
+    while (index < medRows.length) {
+      final page = _newReportPage()
+        ..writeln(_pdfText('Medication details continued', 42, 744,
+            size: 15, color: '0.110 0.145 0.180', bold: true))
+        ..writeln(_pdfText('Patient: $patientName', 42, 724,
+            size: 10, color: '0.330 0.380 0.420'));
+      index = _appendMedicationRows(page, medRows, index, startY: 680);
+      _pdfFooter(page, pageNumber: pageNumber);
+      pages.add(page.toString());
+      pageNumber += 1;
     }
-    content.writeln('ET');
 
-    final contentText = content.toString();
+    return _assemblePdf(pages);
+  }
+
+  StringBuffer _newReportPage() =>
+      StringBuffer()..writeln(_pdfRect(0, 0, 612, 792, '0.965 0.977 0.980'));
+
+  int _appendMedicationRows(
+    StringBuffer content,
+    List<Map<dynamic, dynamic>> medications,
+    int startIndex, {
+    required double startY,
+  }) {
+    var y = startY;
+    var index = startIndex;
+    while (index < medications.length && y >= 110) {
+      _pdfMedicationRow(content, medications[index], y);
+      y -= 82;
+      index += 1;
+    }
+    return index;
+  }
+
+  void _pdfMedicationRow(
+    StringBuffer content,
+    Map<dynamic, dynamic> item,
+    double y,
+  ) {
+    final name = '${item['medicationName'] ?? 'Medication'}';
+    final medAdherence =
+        (((item['adherenceRate'] ?? 0.0) as num) * 100).round();
+    final times = _pdfTimes(item);
+    final dosage = '${item['dosage'] ?? ''}'.trim();
+    final daily = item['dosesPerDay'] as num?;
+    content
+      ..writeln(_pdfRect(42, y - 54, 528, 68, '1 1 1'))
+      ..writeln(_pdfStrokeRect(42, y - 54, 528, 68, '0.850 0.890 0.900'))
+      ..writeln(_pdfText(name, 58, y,
+          size: 12, color: '0.110 0.145 0.180', bold: true))
+      ..writeln(_pdfText('$medAdherence%', 516, y,
+          size: 12, color: '0.000 0.478 0.620', bold: true))
+      ..writeln(_pdfText(
+        'Taken ${item['takenDoses']}   Missed ${item['missedDoses']}   Pending ${item['pendingDoses']}',
+        58,
+        y - 19,
+        size: 9,
+        color: '0.330 0.380 0.420',
+      ));
+    final detailParts = <String>[
+      if (dosage.isNotEmpty) 'Dose $dosage',
+      if (daily != null) '${daily.toStringAsFixed(1)} daily',
+      if (times.isNotEmpty) 'Times ${times.join(', ')}',
+    ];
+    if (detailParts.isNotEmpty) {
+      content.writeln(_pdfText(
+        detailParts.join('  |  '),
+        58,
+        y - 36,
+        size: 8,
+        color: '0.330 0.380 0.420',
+      ));
+    }
+  }
+
+  void _pdfFooter(StringBuffer content, {required int pageNumber}) {
+    content.writeln(_pdfText(
+      'Generated by MED360  |  Page $pageNumber',
+      42,
+      44,
+      size: 9,
+      color: '0.500 0.540 0.580',
+    ));
+  }
+
+  Uint8List _assemblePdf(List<String> pageContents) {
+    final pageCount = pageContents.length;
+    const pageStartId = 3;
+    final contentStartId = pageStartId + pageCount;
+    final regularFontId = contentStartId + pageCount;
+    final boldFontId = regularFontId + 1;
+    final kids = List.generate(
+      pageCount,
+      (index) => '${pageStartId + index} 0 R',
+    ).join(' ');
     final objects = <String>[
       '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-      '3 0 obj\n'
-          '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
-          '/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\n'
-          'endobj\n',
-      '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\n'
-          'endobj\n',
-      '5 0 obj\n<< /Length ${latin1.encode(contentText).length} >>\n'
-          'stream\n$contentText'
-          'endstream\nendobj\n',
+      '2 0 obj\n<< /Type /Pages /Kids [$kids] /Count $pageCount >>\nendobj\n',
     ];
+    for (var i = 0; i < pageCount; i++) {
+      objects.add('${pageStartId + i} 0 obj\n'
+          '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+          '/Resources << /Font << /F1 $regularFontId 0 R /F2 $boldFontId 0 R >> >> '
+          '/Contents ${contentStartId + i} 0 R >>\n'
+          'endobj\n');
+    }
+    for (var i = 0; i < pageCount; i++) {
+      final contentText = pageContents[i];
+      objects.add('${contentStartId + i} 0 obj\n'
+          '<< /Length ${latin1.encode(contentText).length} >>\n'
+          'stream\n$contentText'
+          'endstream\nendobj\n');
+    }
+    objects
+      ..add(
+        '$regularFontId 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+      )
+      ..add(
+        '$boldFontId 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
+      );
 
     final buffer = StringBuffer('%PDF-1.4\n');
     final offsets = <int>[0];
@@ -330,6 +497,56 @@ class ReportProvider extends ChangeNotifier {
 
     return Uint8List.fromList(latin1.encode(buffer.toString()));
   }
+
+  void _pdfMetricCard(
+    StringBuffer content,
+    double x,
+    double y,
+    String label,
+    String value,
+    String color,
+  ) {
+    content
+      ..writeln(_pdfRect(x, y, 132, 64, '1 1 1'))
+      ..writeln(_pdfStrokeRect(x, y, 132, 64, '0.850 0.890 0.900'))
+      ..writeln(
+          _pdfText(label, x + 14, y + 39, size: 9, color: '0.330 0.380 0.420'))
+      ..writeln(
+          _pdfText(value, x + 14, y + 16, size: 20, color: color, bold: true));
+  }
+
+  List<String> _pdfTimes(Map<dynamic, dynamic> item) {
+    final reminders = item['reminderTimes'] is List
+        ? (item['reminderTimes'] as List).whereType<String>().toList()
+        : const <String>[];
+    final scheduled = item['scheduledTimes'] is List
+        ? (item['scheduledTimes'] as List).whereType<String>().toList()
+        : const <String>[];
+    return reminders.isNotEmpty ? reminders : scheduled;
+  }
+
+  String _pdfRect(double x, double y, double w, double h, String color) =>
+      'q $color rg ${x.toStringAsFixed(1)} ${y.toStringAsFixed(1)} '
+      '${w.toStringAsFixed(1)} ${h.toStringAsFixed(1)} re f Q';
+
+  String _pdfStrokeRect(double x, double y, double w, double h, String color) =>
+      'q $color RG 1 w ${x.toStringAsFixed(1)} ${y.toStringAsFixed(1)} '
+      '${w.toStringAsFixed(1)} ${h.toStringAsFixed(1)} re S Q';
+
+  String _pdfText(
+    String text,
+    double x,
+    double y, {
+    double size = 11,
+    String color = '0 0 0',
+    bool bold = false,
+  }) =>
+      'q $color rg BT /${bold ? 'F2' : 'F1'} ${size.toStringAsFixed(1)} Tf '
+      '${x.toStringAsFixed(1)} ${y.toStringAsFixed(1)} Td '
+      '(${_escapePdfText(_pdfSafeText(text))}) Tj ET Q';
+
+  String _pdfSafeText(String text) =>
+      text.replaceAll(RegExp(r'[^\x20-\x7E]'), '?');
 
   String _escapePdfText(String text) {
     final latinText = String.fromCharCodes(

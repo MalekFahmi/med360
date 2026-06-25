@@ -234,4 +234,30 @@ extension FirebaseBackendReportMethods on FirebaseBackendService {
       );
     }
   }
+
+  Future<void> restoreReport(String reportId) async {
+    if (!_enabled || _firestore == null) return;
+    final reportDoc =
+        await _firestore!.collection('sharedReports').doc(reportId).get();
+    final report = reportDoc.data();
+    await _firestore!.collection('sharedReports').doc(reportId).set({
+      'archived': false,
+      'restoredAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    if (report != null) {
+      final role =
+          await _currentUserRole() ?? report['recipientRole'] ?? 'user';
+      await logAdherenceEvent(
+        patientId: report['patientId'] ?? '',
+        patientUid: report['patientUid'],
+        eventType: role == 'doctor'
+            ? 'doctorReportRestored'
+            : role == 'caregiver'
+                ? 'caregiverReportRestored'
+                : 'reportRestored',
+        source: role,
+        details: {'reportId': reportId, 'reportType': report['reportType']},
+      );
+    }
+  }
 }

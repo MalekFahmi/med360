@@ -10,12 +10,14 @@ class SharedReportDetailScreen extends StatelessWidget {
   final Map<String, dynamic> report;
   final VoidCallback? onReview;
   final VoidCallback? onArchive;
+  final VoidCallback? onRestore;
 
   const SharedReportDetailScreen({
     super.key,
     required this.report,
     this.onReview,
     this.onArchive,
+    this.onRestore,
   });
 
   @override
@@ -28,6 +30,7 @@ class SharedReportDetailScreen extends StatelessWidget {
     final isUploaded = type == 'uploaded' || payload['downloadUrl'] != null;
     final label = '${payload['label'] ?? strings.report}';
     final isArabic = context.watch<AuthProvider>().arabicMode;
+    final archived = report['archived'] == true;
 
     return Directionality(
       textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
@@ -71,9 +74,17 @@ class SharedReportDetailScreen extends StatelessWidget {
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: onArchive,
-                    icon: const Icon(Icons.archive_outlined),
-                    label: Text(strings.archive),
+                    onPressed: archived ? onRestore : onArchive,
+                    icon: Icon(
+                      archived
+                          ? Icons.unarchive_outlined
+                          : Icons.archive_outlined,
+                    ),
+                    label: Text(
+                      archived
+                          ? strings.pick('استعادة', 'Restore')
+                          : strings.archive,
+                    ),
                   ),
                 ),
               ],
@@ -192,8 +203,13 @@ class _MedicationReportCard extends StatelessWidget {
     final taken = ((item['takenDoses'] as num?) ?? 0).toInt();
     final missed = ((item['missedDoses'] as num?) ?? 0).toInt();
     final pending = ((item['pendingDoses'] as num?) ?? 0).toInt();
+    final times = _times();
+    final dosage = '${item['dosage'] ?? ''}'.trim();
+    final dailyDoses = item['dosesPerDay'] as num?;
+    final notes = _notes(context);
 
     return AppCard(
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -202,23 +218,164 @@ class _MedicationReportCard extends StatelessWidget {
               const Icon(Icons.medication_rounded, color: AppColors.teal),
               const SizedBox(width: AppSpacing.sm),
               Expanded(child: Text(name, style: AppTextStyles.medName)),
-              Text('$adherence%',
-                  style: AppTextStyles.screenTitle.copyWith(
-                    color: AppColors.teal,
-                    fontSize: 22,
-                  )),
+              AppBadge(
+                label: '$adherence%',
+                variant: adherence >= 80
+                    ? BadgeVariant.green
+                    : adherence >= 50
+                        ? BadgeVariant.amber
+                        : BadgeVariant.red,
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
           AdherenceBar(rate: adherence / 100, height: 10),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            strings.medicationReportStats(
-              taken: taken,
-              missed: missed,
-              pending: pending,
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _ReportMiniStat(
+                  label: strings.taken,
+                  value: '$taken',
+                  color: AppColors.green,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _ReportMiniStat(
+                  label: strings.missed,
+                  value: '$missed',
+                  color: AppColors.red,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _ReportMiniStat(
+                  label: strings.pending,
+                  value: '$pending',
+                  color: AppColors.amber,
+                ),
+              ),
+            ],
+          ),
+          if (dosage.isNotEmpty || dailyDoses != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (dosage.isNotEmpty)
+                  AppBadge(
+                    label: strings.pick('الجرعة $dosage', 'Dose $dosage'),
+                    variant: BadgeVariant.blue,
+                    icon: Icons.medication_liquid_rounded,
+                  ),
+                if (dailyDoses != null)
+                  AppBadge(
+                    label: strings.pick(
+                      '${dailyDoses.toStringAsFixed(1)} يومياً',
+                      '${dailyDoses.toStringAsFixed(1)} daily',
+                    ),
+                    variant: BadgeVariant.teal,
+                    icon: Icons.today_rounded,
+                  ),
+              ],
             ),
-            style: AppTextStyles.medDetail,
+          ],
+          if (times.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              strings.pick('أوقات الدواء', 'Medication times'),
+              style: AppTextStyles.medDetail.copyWith(
+                fontWeight: FontWeight.w800,
+                color: AppColors.grayDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final time in times)
+                  AppBadge(
+                    label: time,
+                    variant: BadgeVariant.gray,
+                    icon: Icons.schedule_rounded,
+                  ),
+              ],
+            ),
+          ],
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: const BoxDecoration(
+                color: AppColors.skyLight,
+                borderRadius: AppRadius.md,
+              ),
+              child: Text(
+                strings.pick('ملاحظات: $notes', 'Notes: $notes'),
+                style: AppTextStyles.medDetail.copyWith(
+                  color: AppColors.navy,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<String> _times() {
+    final reminders = item['reminderTimes'] is List
+        ? (item['reminderTimes'] as List).whereType<String>().toList()
+        : const <String>[];
+    final scheduled = item['scheduledTimes'] is List
+        ? (item['scheduledTimes'] as List).whereType<String>().toList()
+        : const <String>[];
+    return reminders.isNotEmpty ? reminders : scheduled;
+  }
+
+  String _notes(BuildContext context) {
+    final strings = AppStrings.of(context);
+    return strings.isArabic
+        ? '${item['notesAr'] ?? item['notes'] ?? ''}'.trim()
+        : '${item['notes'] ?? item['notesAr'] ?? ''}'.trim();
+  }
+}
+
+class _ReportMiniStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _ReportMiniStat({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: AppRadius.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.metricLabel),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: AppTextStyles.metricValue.copyWith(
+              color: color,
+              fontSize: 22,
+            ),
           ),
         ],
       ),

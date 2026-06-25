@@ -59,19 +59,18 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   }
 
   Future<void> _linkPatient() async {
-    final phone = await showModalBottomSheet<String>(
+    final identifier = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
       builder: (_) => const _PatientLinkSheet(),
     );
-    if (phone == null || !mounted) return;
+    if (identifier == null || !mounted) return;
 
-    final linked = await FirebaseBackendService()
-        .careTeam
-        .linkPatientToCurrentDoctorByPhone(
-          phone,
-        );
+    final linked =
+        await FirebaseBackendService().careTeam.linkPatientToCurrentDoctor(
+              identifier,
+            );
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -79,7 +78,7 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
         content: Text(
           linked
               ? 'تم ربط المريض بالطبيب'
-              : 'لم يتم العثور على مريض بهذا الرقم',
+              : 'لم يتم العثور على مريض بهذا البريد أو الرقم',
         ),
         backgroundColor: linked ? AppColors.teal : AppColors.red,
         behavior: SnackBarBehavior.floating,
@@ -100,6 +99,52 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     await _load();
   }
 
+  Future<void> _restoreReport(String reportId) async {
+    if (reportId.isEmpty) return;
+    await FirebaseBackendService().reports.restore(reportId);
+    await _load();
+  }
+
+  Future<void> _unlinkPatient(Map<String, dynamic> patient) async {
+    final strings = AppStrings.of(context);
+    final patientUid = '${patient['patientUid'] ?? ''}';
+    if (patientUid.isEmpty) return;
+    final name = '${patient['name'] ?? strings.patient}';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.pick('حذف المريض؟', 'Remove patient?')),
+        content: Text(
+          strings.pick(
+            'سيتم حذف $name من لوحة الطبيب فقط، ولن يتم حذف حساب المريض.',
+            '$name will be removed from this doctor dashboard only. The patient account will not be deleted.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(strings.pick('إلغاء', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.red),
+            child: Text(strings.pick('حذف', 'Remove')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await FirebaseBackendService()
+        .careTeam
+        .unlinkCurrentDoctorFromPatient(patientUid: patientUid);
+    if (!mounted) return;
+    setState(() {
+      _patients = _patients
+          .where((item) => '${item['patientUid'] ?? ''}' != patientUid)
+          .toList();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final doctor = context.watch<AuthProvider>().doctor;
@@ -107,11 +152,13 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     final isArabic = strings.isArabic;
     final visibleReports =
         _reports.where((report) => report['archived'] != true).toList();
+    final archivedReports =
+        _reports.where((report) => report['archived'] == true).toList();
 
     return Directionality(
       textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Scaffold(
           backgroundColor: AppColors.pageTint,
           appBar: AppBar(
@@ -131,6 +178,9 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                 Tab(
                     icon: const Icon(Icons.summarize_outlined),
                     text: strings.reports),
+                Tab(
+                    icon: const Icon(Icons.archive_outlined),
+                    text: strings.pick('الأرشيف', 'Archive')),
               ],
             ),
           ),
@@ -147,11 +197,20 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                   patients: _patients,
                   reportsCount: visibleReports.length,
                   onLink: _linkPatient,
+                  onDelete: _unlinkPatient,
                 ),
                 _ReportsTab(
                   reports: visibleReports,
                   onReview: _reviewReport,
                   onArchive: _archiveReport,
+                  onRestore: _restoreReport,
+                ),
+                _ReportsTab(
+                  reports: archivedReports,
+                  archived: true,
+                  onReview: _reviewReport,
+                  onArchive: _archiveReport,
+                  onRestore: _restoreReport,
                 ),
               ],
             ),
@@ -169,6 +228,7 @@ class _PatientsTab extends StatelessWidget {
   final List<Map<String, dynamic>> patients;
   final int reportsCount;
   final VoidCallback onLink;
+  final ValueChanged<Map<String, dynamic>> onDelete;
 
   const _PatientsTab({
     required this.loading,
@@ -177,6 +237,7 @@ class _PatientsTab extends StatelessWidget {
     required this.patients,
     required this.reportsCount,
     required this.onLink,
+    required this.onDelete,
   });
 
   @override
@@ -266,6 +327,18 @@ class _PatientsTab extends StatelessWidget {
               child: SharedPatientCard(
                 patient: patient,
                 actorRole: 'doctor',
+                footer: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: OutlinedButton.icon(
+                    onPressed: () => onDelete(patient),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: Text(strings.pick('حذف المريض', 'Remove')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.red,
+                      side: const BorderSide(color: AppColors.red),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -276,13 +349,17 @@ class _PatientsTab extends StatelessWidget {
 
 class _ReportsTab extends StatelessWidget {
   final List<Map<String, dynamic>> reports;
+  final bool archived;
   final ValueChanged<String> onReview;
   final ValueChanged<String> onArchive;
+  final ValueChanged<String> onRestore;
 
   const _ReportsTab({
     required this.reports,
+    this.archived = false,
     required this.onReview,
     required this.onArchive,
+    required this.onRestore,
   });
 
   @override
@@ -294,8 +371,15 @@ class _ReportsTab extends StatelessWidget {
         children: [
           EmptyState(
             icon: Icons.summarize_outlined,
-            title: strings.noReports,
-            subtitle: strings.sharedReportsHint,
+            title: archived
+                ? strings.pick('لا توجد تقارير مؤرشفة', 'No archived reports')
+                : strings.noReports,
+            subtitle: archived
+                ? strings.pick(
+                    'ستظهر هنا التقارير التي تقوم بأرشفتها.',
+                    'Reports you archive will appear here.',
+                  )
+                : strings.sharedReportsHint,
           ),
         ],
       );
@@ -321,6 +405,7 @@ class _ReportsTab extends StatelessWidget {
                 ),
                 onReview: () => onReview('${report['id'] ?? ''}'),
                 onArchive: () => onArchive('${report['id'] ?? ''}'),
+                onRestore: () => onRestore('${report['id'] ?? ''}'),
               ),
             ),
           )
@@ -338,17 +423,17 @@ class _PatientLinkSheet extends StatefulWidget {
 
 class _PatientLinkSheetState extends State<_PatientLinkSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _phoneCtrl = TextEditingController();
+  final _identifierCtrl = TextEditingController();
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
+    _identifierCtrl.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.pop(context, _phoneCtrl.text.trim());
+    Navigator.pop(context, _identifierCtrl.text.trim());
   }
 
   @override
@@ -378,15 +463,21 @@ class _PatientLinkSheetState extends State<_PatientLinkSheet> {
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
+                controller: _identifierCtrl,
+                keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
-                  labelText: strings.patientPhone,
-                  prefixIcon: const Icon(Icons.phone_outlined),
+                  labelText: strings.pick(
+                    'بريد أو هاتف المريض',
+                    'Patient email or phone',
+                  ),
+                  prefixIcon: const Icon(Icons.alternate_email_rounded),
                 ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? strings.enterPatientPhone
+                    ? strings.pick(
+                        'أدخل بريد أو هاتف المريض',
+                        'Enter the patient email or phone',
+                      )
                     : null,
                 onFieldSubmitted: (_) => _submit(),
               ),

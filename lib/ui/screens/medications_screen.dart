@@ -59,6 +59,7 @@ class MedicationsScreen extends StatelessWidget {
     try {
       await NotificationService().scheduleMedicationReminders(
         saved,
+        patientId: auth.patient!.id,
         isArabic: auth.arabicMode,
       );
       await FirebaseBackendService().analytics.logReminderEvent(
@@ -117,8 +118,7 @@ class MedicationsScreen extends StatelessWidget {
     );
     if (confirmed != true || auth.patient == null) return;
 
-    await medProvider.deleteMedication(med.id);
-    await NotificationService().cancelMedicationReminders(med);
+    await medProvider.deleteMedication(auth.patient!.id, med);
     await adherence.loadAndGenerate(
       patientId: auth.patient!.id,
       medications: medProvider.medications,
@@ -186,6 +186,7 @@ class MedicationsScreen extends StatelessWidget {
                               await NotificationService()
                                   .scheduleMedicationReminders(
                                 updated,
+                                patientId: auth.patient!.id,
                                 isArabic: auth.arabicMode,
                               );
                             }
@@ -253,6 +254,9 @@ class _MedicationCard extends StatelessWidget {
     final daysLeft = medication.estimatedDaysRemaining;
     return AppCard(
       onTap: onTap,
+      color: paused ? AppColors.surfaceMuted : AppColors.surface,
+      borderColor:
+          medication.needsRefill ? AppColors.amberLight : AppColors.border,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,21 +273,43 @@ class _MedicationCard extends StatelessWidget {
                     Text(
                       displayName,
                       style: AppTextStyles.screenTitle.copyWith(fontSize: 22),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 6),
                     Text(
                       '$formLabel • ${medication.dosage}',
                       style: AppTextStyles.medDetail.copyWith(fontSize: 15),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
               PopupMenuButton<String>(
+                tooltip: strings.pick('خيارات الدواء', 'Medication options'),
+                position: PopupMenuPosition.under,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: AppRadius.md,
+                ),
                 onSelected: (value) {
                   if (value == 'edit') onEdit();
                   if (value == 'pause') onPauseResume();
                   if (value == 'delete') onDelete();
                 },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.grayLight,
+                    borderRadius: AppRadius.sm,
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Icon(
+                    Icons.more_horiz_rounded,
+                    color: AppColors.grayDark,
+                  ),
+                ),
                 itemBuilder: (_) => [
                   PopupMenuItem(
                     value: 'edit',
@@ -387,7 +413,15 @@ class _InfoLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: AppColors.grayMid, size: 21),
+        Container(
+          width: 30,
+          height: 30,
+          decoration: const BoxDecoration(
+            color: AppColors.grayLight,
+            borderRadius: AppRadius.sm,
+          ),
+          child: Icon(icon, color: AppColors.tealDark, size: 18),
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(

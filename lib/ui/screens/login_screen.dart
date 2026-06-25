@@ -67,6 +67,66 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _loginWithGoogle() async {
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.signInWithGoogle(role: widget.selectedRole);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(auth.errorMessage ?? 'تعذر تسجيل الدخول باستخدام Google'),
+          backgroundColor: AppColors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final controller = TextEditingController(text: _emailCtrl.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('إعادة تعيين كلمة المرور'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            labelText: 'البريد الإلكتروني',
+            helperText:
+                'إعادة التعيين عبر SMS غير مفعلة في إعداد Firebase الحالي.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('إرسال'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (email == null || email.isEmpty || !mounted) return;
+    final ok = await context.read<AuthProvider>().sendPasswordReset(email);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'تم إرسال رابط إعادة التعيين إلى البريد.'
+              : context.read<AuthProvider>().errorMessage ??
+                  'تعذر إرسال رابط إعادة التعيين.',
+        ),
+        backgroundColor: ok ? AppColors.teal : AppColors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -98,12 +158,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             decoration: const InputDecoration(
-                              labelText: 'البريد الإلكتروني',
-                              prefixIcon: Icon(Icons.email_outlined),
+                              labelText: 'البريد الإلكتروني أو رقم الهاتف',
+                              prefixIcon: Icon(Icons.account_circle_outlined),
                             ),
                             validator: (value) =>
-                                value == null || !value.contains('@')
-                                    ? 'أدخل البريد الإلكتروني'
+                                value == null || value.trim().isEmpty
+                                    ? 'أدخل البريد الإلكتروني أو رقم الهاتف'
                                     : null,
                           )
                         else
@@ -138,6 +198,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? 'أدخل كلمة المرور'
                               : null,
                         ),
+                        Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: TextButton(
+                            onPressed: auth.isLoading ? null : _forgotPassword,
+                            child: const Text('نسيت كلمة المرور؟'),
+                          ),
+                        ),
                         const SizedBox(height: AppSpacing.xl),
                         FilledButton(
                           onPressed: auth.isLoading ? null : _login,
@@ -151,6 +218,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 )
                               : const Text('دخول'),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton.icon(
+                          onPressed: auth.isLoading ? null : _loginWithGoogle,
+                          icon: const Icon(Icons.g_mobiledata_rounded),
+                          label: const Text('الدخول باستخدام Google'),
                         ),
                       ],
                     ),

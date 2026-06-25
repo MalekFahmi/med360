@@ -58,6 +58,8 @@ class DoseConfirmation {
       );
 
   DoseConfirmation copyWith({
+    String? scheduledTime,
+    DateTime? scheduledDate,
     DoseStatus? status,
     DateTime? confirmedAt,
     bool? caregiverNotified,
@@ -67,8 +69,8 @@ class DoseConfirmation {
         id: id,
         medicationId: medicationId,
         medicationName: medicationName,
-        scheduledTime: scheduledTime,
-        scheduledDate: scheduledDate,
+        scheduledTime: scheduledTime ?? this.scheduledTime,
+        scheduledDate: scheduledDate ?? this.scheduledDate,
         confirmedAt: confirmedAt ?? this.confirmedAt,
         status: status ?? this.status,
         caregiverNotified: caregiverNotified ?? this.caregiverNotified,

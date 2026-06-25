@@ -18,19 +18,25 @@ class CaregiverScreen extends StatelessWidget {
     );
     if (request == null || !context.mounted) return;
 
-    final ok = await context.read<AuthProvider>().addCaregiverByEmail(
-          email: request.email,
-          relationship: request.relationship,
-          permission: request.permission,
-        );
+    final auth = context.read<AuthProvider>();
+    final identifier = request.email.trim();
+    final ok = identifier.contains('@')
+        ? await auth.addCaregiverByEmail(
+            email: identifier,
+            relationship: request.relationship,
+          )
+        : await auth.addCaregiverByPhone(
+            phone: identifier,
+            relationship: request.relationship,
+          );
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(ok
             ? 'تم ربط حساب المرافق'
-            : context.read<AuthProvider>().errorMessage ??
-                'لم يتم العثور على مرافق بهذا البريد'),
+            : auth.errorMessage ??
+                'لم يتم العثور على مرافق بهذا البريد أو الهاتف'),
         backgroundColor: ok ? AppColors.teal : AppColors.red,
         behavior: SnackBarBehavior.floating,
       ),
@@ -137,29 +143,11 @@ class _CaregiverCard extends StatelessWidget {
           PopupMenuButton<String>(
             onSelected: (value) async {
               final auth = context.read<AuthProvider>();
-              if (value == 'missed') {
-                await auth.updateCaregiverPermission(
-                  caregiver.id,
-                  NotificationPermission.missedDoseOnly,
-                );
-              } else if (value == 'all') {
-                await auth.updateCaregiverPermission(
-                  caregiver.id,
-                  NotificationPermission.all,
-                );
-              } else if (value == 'none') {
-                await auth.updateCaregiverPermission(
-                  caregiver.id,
-                  NotificationPermission.none,
-                );
-              } else if (value == 'remove') {
+              if (value == 'remove') {
                 await auth.removeCaregiver(caregiver.id);
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'missed', child: Text('تنبيهات فقط')),
-              PopupMenuItem(value: 'all', child: Text('وصول كامل')),
-              PopupMenuItem(value: 'none', child: Text('بدون تنبيهات')),
               PopupMenuItem(value: 'remove', child: Text('إزالة')),
             ],
           ),
@@ -180,7 +168,6 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _relationCtrl = TextEditingController();
-  NotificationPermission _permission = NotificationPermission.missedDoseOnly;
 
   @override
   void dispose() {
@@ -196,7 +183,6 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
       _CaregiverLinkRequest(
         email: _emailCtrl.text.trim().toLowerCase(),
         relationship: _relationCtrl.text.trim(),
-        permission: _permission,
       ),
     );
   }
@@ -220,16 +206,15 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
                 controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
+                keyboardType: TextInputType.text,
                 decoration: const InputDecoration(
-                  labelText: 'بريد المرافق',
-                  prefixIcon: Icon(Icons.email_outlined),
+                  labelText: 'بريد أو هاتف المرافق',
+                  prefixIcon: Icon(Icons.alternate_email_rounded),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'أدخل بريد المرافق';
+                    return 'أدخل بريد أو هاتف المرافق';
                   }
-                  if (!value.contains('@')) return 'أدخل بريد صحيح';
                   return null;
                 },
               ),
@@ -243,28 +228,6 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'أدخل صلة القرابة'
                     : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<NotificationPermission>(
-                value: _permission,
-                decoration: const InputDecoration(labelText: 'الصلاحية'),
-                items: const [
-                  DropdownMenuItem(
-                    value: NotificationPermission.missedDoseOnly,
-                    child: Text('تنبيهات فقط'),
-                  ),
-                  DropdownMenuItem(
-                    value: NotificationPermission.all,
-                    child: Text('وصول كامل'),
-                  ),
-                  DropdownMenuItem(
-                    value: NotificationPermission.none,
-                    child: Text('بدون تنبيهات'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _permission = value);
-                },
               ),
               const SizedBox(height: AppSpacing.xl),
               FilledButton.icon(
@@ -283,11 +246,9 @@ class _CaregiverFormSheetState extends State<_CaregiverFormSheet> {
 class _CaregiverLinkRequest {
   final String email;
   final String relationship;
-  final NotificationPermission permission;
 
   const _CaregiverLinkRequest({
     required this.email,
     required this.relationship,
-    required this.permission,
   });
 }

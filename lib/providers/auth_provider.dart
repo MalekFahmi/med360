@@ -260,6 +260,28 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> sendPasswordReset(String email) async {
+    _errorMessage = null;
+    final normalizedEmail = email.trim().toLowerCase();
+    if (!_isValidEmail(normalizedEmail)) {
+      _errorMessage = 'أدخل بريدًا إلكترونيًا صحيحًا لإعادة تعيين كلمة المرور.';
+      notifyListeners();
+      return false;
+    }
+    try {
+      await FirebaseBackendService().sendPasswordResetEmail(normalizedEmail);
+      return true;
+    } catch (e) {
+      _errorMessage = _friendlyAuthError(
+        e,
+        fallback:
+            'تعذر إرسال رابط إعادة تعيين كلمة المرور. تأكد من البريد وحاول مرة أخرى.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> registerCaregiver({
     required String name,
     required String email,
@@ -407,6 +429,73 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────
+  Future<bool> signInWithGoogle({
+    required AccountRole role,
+    String? phone,
+    String? specialty,
+    String? licenseNumber,
+    DateTime? dateOfBirth,
+    String? chronicCondition,
+  }) async {
+    _errorMessage = null;
+    _status = AuthStatus.loading;
+    notifyListeners();
+
+    try {
+      final backend = FirebaseBackendService();
+      final prefs = await SharedPreferences.getInstance();
+      switch (role) {
+        case AccountRole.patient:
+          final patient = await backend.signInPatientWithGoogle(
+            phone: phone,
+            dateOfBirth: dateOfBirth,
+            chronicCondition: chronicCondition,
+          );
+          await _db.insertPatient(patient);
+          _patient = patient;
+          _caregiver = null;
+          _doctor = null;
+          _linkedDoctors = await backend.fetchDoctorsForCurrentPatient();
+          _arabicMode = patient.arabicMode;
+          _role = AccountRole.patient;
+          await prefs.setString('loggedInPatientId', patient.id);
+          await prefs.setBool('arabicMode', patient.arabicMode);
+          break;
+        case AccountRole.caregiver:
+          _caregiver = await backend.signInCaregiverWithGoogle(phone: phone);
+          _patient = null;
+          _doctor = null;
+          _linkedDoctors = [];
+          _role = AccountRole.caregiver;
+          await prefs.remove('loggedInPatientId');
+          break;
+        case AccountRole.doctor:
+          _doctor = await backend.signInDoctorWithGoogle(
+            phone: phone,
+            specialty: specialty,
+            licenseNumber: licenseNumber,
+          );
+          _patient = null;
+          _caregiver = null;
+          _linkedDoctors = [];
+          _role = AccountRole.doctor;
+          await prefs.remove('loggedInPatientId');
+          break;
+      }
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = _friendlyAuthError(
+        e,
+        fallback: 'تعذر تسجيل الدخول باستخدام Google.',
+      );
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> _saveAndNotify(PatientUser updated) async {
     _patient = updated;
     _arabicMode = updated.arabicMode;
@@ -448,7 +537,7 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> addCaregiverByEmail({
     required String email,
     required String relationship,
-    NotificationPermission permission = NotificationPermission.missedDoseOnly,
+    NotificationPermission permission = NotificationPermission.all,
   }) async {
     final registered =
         await FirebaseBackendService().findCaregiverByEmail(email);
@@ -471,7 +560,7 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> addCaregiverByPhone({
     required String phone,
     required String relationship,
-    NotificationPermission permission = NotificationPermission.missedDoseOnly,
+    NotificationPermission permission = NotificationPermission.all,
   }) async {
     final registered =
         await FirebaseBackendService().findCaregiverByPhone(phone);
@@ -577,13 +666,33 @@ class AuthProvider extends ChangeNotifier {
   String _hashPassword(String pw) =>
       pw.codeUnits.fold(0, (h, c) => h + c * 31).toString();
 
+  bool _isValidEmail(String email) =>
+      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
+
   String _friendlyAuthError(Object error, {required String fallback}) {
     final raw = error.toString();
+    if (raw.contains('invalid-email')) {
+      return 'أدخل بريدًا إلكترونيًا صحيحًا.';
+    }
+    if (raw.contains('No caregiver account was found') ||
+        raw.contains('No doctor account was found')) {
+      return 'لم يتم العثور على حساب بهذا الرقم.';
+    }
+    if (raw.contains('Complete caregiver signup') ||
+        raw.contains('Complete doctor signup')) {
+      return 'أكمل إنشاء الحساب باستخدام Google أولاً.';
+    }
+    if (raw.contains('registered for another role')) {
+      return 'هذا الحساب مسجل بدور مختلف.';
+    }
+    if (raw.contains('Google sign-in was cancelled')) {
+      return 'تم إلغاء تسجيل الدخول باستخدام Google.';
+    }
     if (raw.contains('weak-password')) {
       return 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.';
     }
     if (raw.contains('email-already-in-use')) {
-      return 'هذا الحساب موجود مسبقاً. جرّب تسجيل الدخول.';
+      return 'هذا البريد مستخدم مسبقاً في Firebase. استخدم بريداً مختلفاً لهذا الدور أو سجّل الدخول بالحساب الموجود.';
     }
     if (raw.contains('phone number is already registered')) {
       return 'رقم الهاتف مسجل مسبقاً. سجل الدخول بكلمة المرور الأصلية.';

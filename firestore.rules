@@ -129,6 +129,25 @@ service cloud.firestore {
         && request.auth.uid == doctorUid;
     }
 
+    match /roleLoginDirectory/{entryId} {
+      allow get: if true;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.role in ["caregiver", "doctor"]
+        && entryId == request.resource.data.role + "_" + request.resource.data.phoneNormalized;
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.role in ["caregiver", "doctor"]
+        && entryId == request.resource.data.role + "_" + request.resource.data.phoneNormalized;
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
     match /patientDirectory/{patientUid} {
       allow read, list: if isDoctorUser() || isCaregiverUser();
 
